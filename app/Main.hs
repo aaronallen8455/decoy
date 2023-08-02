@@ -4,34 +4,58 @@ module Main where
 import           Control.Applicative (asum)
 import           Control.Concurrent.MVar
 import           Control.Monad
+import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.Lazy.Char8 as BS8
 import qualified Data.Map.Strict as M
+import           Data.Maybe
 import qualified Data.Text as T
-import qualified Network.HTTP.Types.Status as Http
+import qualified Data.Text.Encoding as TE
+import qualified Network.HTTP.Types as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
+import qualified Text.Mustache as Stache
 
 main :: IO ()
 main = do
-  initRules <- newMVar []
+  initRules <- newMVar [testRule]
   Warp.runEnv 9000 (app initRules)
+
+testRule :: Rule
+testRule = MkRule
+  { pathRule = [Static "one", PathParam "two"]
+  , queryRule = mempty
+  , response = either (error . show) id $
+      Stache.compileTemplate "" "{\"hello\": \"world\", \"bodyParam\":\"{{body.two}}\", \"pathParam\":\"{{path.two}}\"}"
+  }
 
 app :: Rules -> Wai.Application
 app rulesMVar req respHandler = do
   let reqPath = Wai.pathInfo req
       queryMap = M.fromList $ Wai.queryString req
-  _reqBodyBS <- Wai.strictRequestBody req
+  reqBodyBS <- Wai.strictRequestBody req
+  let eReqBodyJson =
+        case lookup Http.hContentType $ Wai.requestHeaders req of
+          Just ct | ct `elem` ["text/json", "application/json"] ->
+            Just <$> Aeson.eitherDecode reqBodyBS
+          _ -> Right Nothing
   rules <- readMVar rulesMVar
   respHandler $
-    case asum $ matchRule queryMap reqPath <$> rules of
-      Nothing -> Wai.responseLBS Http.notFound404 [] "No rule matched"
-      Just resp -> Wai.responseLBS Http.ok200 [] resp
+    case eReqBodyJson of
+      Left err -> Wai.responseLBS Http.badRequest400 []
+                    $ "Invalid JSON: " <> BS8.pack err
+      Right mReqJson ->
+        case asum $ matchRule queryMap reqPath mReqJson <$> rules of
+          Nothing -> Wai.responseLBS Http.notFound404 [] "No rule matched"
+          Just resp ->
+            Wai.responseLBS Http.ok200 []
+                         (LBS.fromStrict $ TE.encodeUtf8 resp)
 
 data Rule = MkRule
   { pathRule :: [Path]
   , queryRule :: QueryRules
-  , response :: ResponseTemplate
+  , response :: Stache.Template
   }
 
 type Rules = MVar [Rule]
@@ -56,21 +80,30 @@ matchPath (_ : _) [] = Nothing
 matchPath [] [] = Just M.empty
 
 matchQuery :: QueryRules -> QueryParams -> Bool
-matchQuery queryRules queryMap = and $ do
-  (name, mVal) <- M.toList queryRules
-  let mQV = M.lookup name queryMap
-  case mQV of
-    Nothing -> [False]
-    Just qv ->
-      pure $ maybe (const True) (maybe False . (==)) mVal qv
+matchQuery queryRules queryMap = and $ (`map` M.toList queryRules) $
+  \(name, mVal) ->
+    case M.lookup name queryMap of
+      Nothing -> False
+      Just qv -> maybe (const True) (maybe False . (==)) mVal qv
 
-matchRule :: QueryParams -> [T.Text] -> Rule -> Maybe LBS.ByteString
-matchRule queryParams path rule = do
+matchRule :: QueryParams -> [T.Text] -> Maybe Aeson.Value -> Rule -> Maybe T.Text
+matchRule queryParams path mReqJson rule = do
   pathArgs <- matchPath (pathRule rule) path
   guard $ matchQuery (queryRule rule) queryParams
-  Just $ renderTemplate pathArgs queryParams (response rule)
+  Just $ renderTemplate pathArgs queryParams mReqJson (response rule)
 
-renderTemplate :: PathArgs -> QueryParams -> ResponseTemplate -> LBS.ByteString
-renderTemplate _ _ = id
-
-type ResponseTemplate = LBS.ByteString
+renderTemplate
+  :: PathArgs
+  -> QueryParams
+  -> Maybe Aeson.Value
+  -> Stache.Template
+  -> T.Text
+renderTemplate pathArgs queryMap mReqJson template =
+    Stache.substitute template vars
+  where
+    vars = M.fromList
+      [ ("path" :: T.Text, Aeson.toJSON pathArgs)
+      , ("query", Aeson.toJSON . M.mapKeys TE.decodeUtf8Lenient
+                    $ M.mapMaybe (fmap TE.decodeUtf8Lenient) queryMap)
+      , ("body", fromMaybe Aeson.Null mReqJson)
+      ]

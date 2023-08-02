@@ -39,6 +39,7 @@ executable decoy
         bytestring,
         containers,
         http-types,
+        aeson,
         decoy
 
     hs-source-dirs:   app
