@@ -17,12 +17,27 @@ import qualified Data.Text.Encoding as TE
 import qualified Network.HTTP.Types as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
+import qualified System.Directory as Dir
+import qualified System.Environment as Env
+import           System.Exit (die)
 import qualified Text.Mustache as Stache
 
 main :: IO ()
 main = do
-  initRules <- newMVar []
-  Warp.runEnv 9000 (app initRules)
+  initRulesMVar <- newMVar =<< loadRulesFile
+  Warp.runEnv 9000 (app initRulesMVar)
+
+loadRulesFile :: IO [Rule]
+loadRulesFile = do
+  rulesFile <- fromMaybe "rules.json" <$> Env.lookupEnv "RULES_FILE"
+  rulesFileExists <- Dir.doesPathExist rulesFile
+  if rulesFileExists
+     then do
+       values <- Aeson.eitherDecodeFileStrict rulesFile
+       case traverse compileRule =<< values of
+         Left err -> die $ "Failed to parse rules file: " <> err
+         Right rules -> pure rules
+     else pure []
 
 app :: Rules -> Wai.Application
 app rulesMVar req respHandler = do
@@ -40,15 +55,21 @@ app rulesMVar req respHandler = do
 
   case reqPath of
     ["_rules"] ->
-      case compileRule =<< Aeson.parseEither Aeson.parseJSON
-                       =<< maybe (Left "No body") Right
-                       =<< eReqBodyJson of
+      case traverse compileRule
+             =<< Aeson.parseEither Aeson.parseJSON
+             =<< maybe (Left "No body") Right
+             =<< eReqBodyJson of
         Left err -> respHandler
                   . Wai.responseLBS Http.badRequest400 []
                   $ "Invalid JSON: " <> BS8.pack err
-        Right rule -> do
-          modifyMVar_ rulesMVar (pure . (rule :))
-          respHandler $ Wai.responseLBS Http.ok200 [] "Rule added"
+        Right rules -> do
+          modifyMVar_ rulesMVar (pure . (rules ++))
+          respHandler $ Wai.responseLBS Http.ok200 [] "Rules added"
+
+    ["_reset"] -> do
+      putMVar rulesMVar =<< loadRulesFile
+      respHandler $ Wai.responseLBS Http.ok200 [] "Rules reset"
+
     _ -> do
       rules <- readMVar rulesMVar
       respHandler $
