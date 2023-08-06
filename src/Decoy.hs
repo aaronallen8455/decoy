@@ -14,7 +14,7 @@ module Decoy
   , RuleSpec(..)
   ) where
 
-import           Control.Applicative (asum)
+import           Control.Applicative (asum, (<|>))
 import qualified Control.Concurrent.Async as Async
 import           Control.Concurrent.Async (Async)
 import           Control.Concurrent.MVar
@@ -24,6 +24,7 @@ import qualified Data.Aeson.Types as Aeson
 import           Data.Bifunctor (first)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as BS8
+import           Data.Foldable (foldl')
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 import qualified Data.Text as T
@@ -36,10 +37,11 @@ import qualified Text.Mustache as Stache
 
 withDecoyServer :: Warp.Port -> Maybe FilePath -> (DecoyCtx -> IO a) -> IO a
 withDecoyServer port mRulesFile cont = do
-  initRulesMVar <- newMVar =<< loadRulesFile mRulesFile
-  Async.withAsync (Warp.run port $ app initRulesMVar mRulesFile) $ \async ->
+  rules <- loadRulesFile mRulesFile
+  initRouterMVar <- newMVar $ mkRouter rules
+  Async.withAsync (Warp.run port $ app initRouterMVar mRulesFile) $ \async ->
     cont DC
-      { dcRules = initRulesMVar
+      { dcRouter = initRouterMVar
       , dcAsync = async
       , dcRulesFile = mRulesFile
       }
@@ -52,11 +54,11 @@ addRule :: DecoyCtx -> Rule -> IO ()
 addRule dc rule = addRules dc [rule]
 
 addRules :: DecoyCtx -> [Rule] -> IO ()
-addRules dc rules = modifyMVar_ (dcRules dc) (pure . (rules ++))
+addRules dc rules = modifyMVar_ (dcRouter dc) (pure . insertRules rules)
 
 reset :: DecoyCtx -> IO ()
 reset dc =
-  putMVar (dcRules dc)
+  putMVar (dcRouter dc) . mkRouter
     =<< loadRulesFile (dcRulesFile dc)
 
 loadRulesFile :: Maybe FilePath -> IO [Rule]
@@ -71,8 +73,8 @@ loadRulesFile (Just rulesFile) = do
          Right rules -> pure rules
      else fail $ "File does not exist: " <> rulesFile
 
-app :: Rules -> Maybe FilePath -> Wai.Application
-app rulesMVar mRulesFile req respHandler = do
+app :: MVar Router -> Maybe FilePath -> Wai.Application
+app routerMVar mRulesFile req respHandler = do
   let reqPath = Wai.pathInfo req
       queryMap = M.mapKeys TE.decodeUtf8Lenient
                . fmap (fmap TE.decodeUtf8Lenient)
@@ -95,21 +97,21 @@ app rulesMVar mRulesFile req respHandler = do
                   . Wai.responseLBS Http.badRequest400 []
                   $ "Invalid JSON: " <> BS8.pack err
         Right rules -> do
-          modifyMVar_ rulesMVar (pure . (rules ++))
+          modifyMVar_ routerMVar (pure . insertRules rules)
           respHandler $ Wai.responseLBS Http.ok200 [] "Rules added"
 
     ["_reset"] -> do
-      putMVar rulesMVar =<< loadRulesFile mRulesFile
+      putMVar routerMVar . mkRouter =<< loadRulesFile mRulesFile
       respHandler $ Wai.responseLBS Http.ok200 [] "Rules reset"
 
     _ -> do
-      rules <- readMVar rulesMVar
+      router <- readMVar routerMVar
       respHandler $
         case eReqBodyJson of
           Left err -> Wai.responseLBS Http.badRequest400 []
                         $ "Invalid JSON: " <> BS8.pack err
           Right mReqJson ->
-            case asum $ matchRule queryMap reqPath mReqJson <$> rules of
+            case matchEndpoint queryMap mReqJson router reqPath of
               Nothing -> Wai.responseLBS Http.notFound404 [] "No rule matched"
               Just resp ->
                 Wai.responseLBS Http.ok200 []
@@ -122,12 +124,10 @@ data Rule = MkRule
   }
 
 data DecoyCtx = DC
-  { dcRules :: Rules -- TODO use a trie for routing
+  { dcRouter :: MVar Router
   , dcAsync :: Async ()
   , dcRulesFile :: Maybe FilePath
   }
-
-type Rules = MVar [Rule]
 
 type QueryParams = M.Map T.Text (Maybe T.Text)
 
@@ -176,15 +176,58 @@ instance Aeson.FromJSON RuleSpec where
 type QueryRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value
 type PathArgs = M.Map T.Text T.Text
 
-matchPath :: [PathPart] -> [T.Text] -> Maybe PathArgs
-matchPath (Static path : pathRest) (r : reqRest)
-  | path == r = matchPath pathRest reqRest
-  | otherwise = Nothing
-matchPath (PathParam paramName : pathRest) (r : reqRest)
-  = M.insert paramName r <$> matchPath pathRest reqRest
-matchPath [] (_ : _) = Nothing
-matchPath (_ : _) [] = Nothing
-matchPath [] [] = Just M.empty
+data Router = RouterNode
+  { staticPaths :: M.Map T.Text Router
+  , paramPath :: Maybe Router
+  , endpoints :: [Endpoint]
+  }
+
+emptyRouter :: Router
+emptyRouter = RouterNode M.empty Nothing []
+
+mkRouter :: [Rule] -> Router
+mkRouter rules = insertRules rules emptyRouter
+
+data Endpoint = MkEndpoint
+  { epPathParamNames :: [T.Text]
+  , epRule :: Rule
+  }
+
+insertRules :: [Rule] -> Router -> Router
+insertRules rules router = foldl' (flip insertRule) router rules
+
+insertRule :: Rule -> Router -> Router
+insertRule rule = go [] (pathRule rule) where
+  go pathParams (Static pathPart : rest) router =
+    let inner = fromMaybe emptyRouter . M.lookup pathPart $ staticPaths router
+        r = go pathParams rest inner
+     in router { staticPaths = M.insert pathPart r $ staticPaths router }
+  go pathParams (PathParam paramName : rest) router =
+    let inner = fromMaybe emptyRouter $ paramPath router
+        r = go (paramName : pathParams) rest inner
+     in router { paramPath = Just r }
+  go pathParams [] router =
+    router { endpoints = MkEndpoint
+              { epPathParamNames = pathParams
+              , epRule = rule
+              } : endpoints router
+           }
+
+matchEndpoint :: QueryParams -> Maybe Aeson.Value -> Router -> [T.Text] -> Maybe T.Text
+matchEndpoint queryParams mReqJson = go [] where
+  go params router (part : rest) = static <|> wildcard where
+    static = do
+      r <- M.lookup part (staticPaths router)
+      go params r rest
+    wildcard = do
+      r <- paramPath router
+      go (part : params) r rest
+  go params router [] = asum $ do
+    ep <- endpoints router
+    guard $ matchQuery (queryRule $ epRule ep) queryParams
+    let pathParams = M.fromList $ zip (epPathParamNames ep) params
+    pure . Just $
+      renderTemplate pathParams queryParams mReqJson (response $ epRule ep)
 
 matchQuery :: QueryRules -> QueryParams -> Bool
 matchQuery queryRules queryMap = and $ (`map` M.toList queryRules) $
@@ -192,12 +235,6 @@ matchQuery queryRules queryMap = and $ (`map` M.toList queryRules) $
     case M.lookup name queryMap of
       Nothing -> False
       Just qv -> maybe (const True) (maybe False . (==)) mVal qv
-
-matchRule :: QueryParams -> [T.Text] -> Maybe Aeson.Value -> Rule -> Maybe T.Text
-matchRule queryParams path mReqJson rule = do
-  pathArgs <- matchPath (pathRule rule) path
-  guard $ matchQuery (queryRule rule) queryParams
-  Just $ renderTemplate pathArgs queryParams mReqJson (response rule)
 
 renderTemplate
   :: PathArgs
