@@ -18,10 +18,20 @@ common warnings
 
 library
     import:           warnings
-    exposed-modules:  MyLib
+    exposed-modules:  Decoy
     -- other-modules:
     -- other-extensions:
-    build-depends:    base ^>=4.18.0.0
+    build-depends:    base ^>=4.18.0.0,
+                      async,
+                      warp,
+                      wai,
+                      mustache,
+                      text,
+                      bytestring,
+                      containers,
+                      http-types,
+                      aeson,
+                      directory
     hs-source-dirs:   src
     default-language: GHC2021
 
