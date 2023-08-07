@@ -19,6 +19,7 @@ import           Control.Concurrent.Async (Async)
 import           Control.Concurrent.MVar
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as BS8
 import qualified Data.Map.Strict as M
@@ -85,7 +86,7 @@ app routerMVar mRulesFile req respHandler = do
   reqBodyBS <- Wai.strictRequestBody req
   let eReqBodyJson =
         case lookup Http.hContentType $ Wai.requestHeaders req of
-          Just ct | ct `elem` ["text/json", "application/json"] ->
+          Just ct | "json" `BS.isInfixOf` ct ->
             Just <$> Aeson.eitherDecode reqBodyBS
           _ -> Right Nothing
 

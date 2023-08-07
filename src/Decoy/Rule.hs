@@ -40,18 +40,18 @@ pathFromText txt = parsePart <$> T.split (== '/') txt
 --       PathParam t -> ":" <> t
 
 data RuleSpec = MkRuleSpec
-  { reqPath :: T.Text
-  , reqQueryRules :: Maybe QueryRules
-  , reqTemplate :: T.Text
+  { rsPath :: T.Text
+  , rsQueryRules :: Maybe QueryRules
+  , rsTemplate :: T.Text
   }
 
 mkRule :: RuleSpec -> Either String Rule
 mkRule req = do
   template <- first show . Stache.compileTemplate ""
-            $ reqTemplate req
+            $ rsTemplate req
   Right MkRule
-    { pathRule = pathFromText $ reqPath req
-    , queryRule = fromMaybe M.empty $ reqQueryRules req
+    { pathRule = pathFromText $ rsPath req
+    , queryRule = fromMaybe M.empty $ rsQueryRules req
     , response = template
     }
 
@@ -60,6 +60,13 @@ instance Aeson.FromJSON RuleSpec where
     MkRuleSpec
     <$> o Aeson..: "path"
     <*> o Aeson..:? "query"
-    <*> o Aeson..: "response"
+    <*> o Aeson..: "template"
+
+instance Aeson.ToJSON RuleSpec where
+  toJSON r = Aeson.object
+    [ "path" Aeson..= rsPath r
+    , "query" Aeson..= rsQueryRules r
+    , "template" Aeson..= rsTemplate r
+    ]
 
 type QueryRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value
