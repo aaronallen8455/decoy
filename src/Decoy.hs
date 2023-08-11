@@ -9,9 +9,10 @@ module Decoy
   , addRules
   , reset
     -- * Types
-  , DecoyCtx
+  , DecoyCtx(..)
   , Rule
   , RuleSpec(..)
+  , Router
   ) where
 
 import qualified Control.Concurrent.Async as Async
@@ -83,9 +84,11 @@ app routerMVar mRulesFile req respHandler = do
                . fmap (fmap TE.decodeUtf8Lenient)
                . M.fromList
                $ Wai.queryString req
+      reqHeaders = Wai.requestHeaders req
+      reqMethod = Wai.requestMethod req
   reqBodyBS <- Wai.strictRequestBody req
   let eReqBodyJson =
-        case lookup Http.hContentType $ Wai.requestHeaders req of
+        case lookup Http.hContentType reqHeaders of
           Just ct | "json" `BS.isInfixOf` ct ->
             Just <$> Aeson.eitherDecode reqBodyBS
           _ -> Right Nothing
@@ -114,8 +117,9 @@ app routerMVar mRulesFile req respHandler = do
           Left err -> Wai.responseLBS Http.badRequest400 []
                         $ "Invalid JSON: " <> BS8.pack err
           Right mReqJson ->
-            case matchEndpoint queryMap mReqJson router reqPath of
+            case matchEndpoint queryMap mReqJson reqHeaders reqMethod router reqPath of
               Nothing -> Wai.responseLBS Http.notFound404 [] "No rule matched"
-              Just resp ->
-                Wai.responseLBS Http.ok200 []
-                             (LBS.fromStrict $ TE.encodeUtf8 resp)
+              Just (resp, mContentType) ->
+                Wai.responseLBS Http.ok200
+                  [ (Http.hContentType, TE.encodeUtf8 ct) | Just ct <- [mContentType] ]
+                  (LBS.fromStrict $ TE.encodeUtf8 resp)

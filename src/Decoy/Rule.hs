@@ -18,7 +18,10 @@ data Rule = MkRule
   { pathRule :: [PathPart]
   , queryRule :: QueryRules
   , response :: Stache.Template
-  } -- TODO req and response content types
+  , requestContentType :: Maybe T.Text
+  , responseContentType :: Maybe T.Text
+  , method :: Maybe T.Text
+  }
 
 data PathPart
   = Static T.Text
@@ -43,6 +46,9 @@ data RuleSpec = MkRuleSpec
   { rsPath :: T.Text
   , rsQueryRules :: Maybe QueryRules
   , rsTemplate :: T.Text
+  , rsRequestContentType :: Maybe T.Text
+  , rsResponseContentType :: Maybe T.Text
+  , rsMethod :: Maybe T.Text
   }
 
 mkRule :: RuleSpec -> Either String Rule
@@ -53,6 +59,9 @@ mkRule req = do
     { pathRule = pathFromText $ rsPath req
     , queryRule = fromMaybe M.empty $ rsQueryRules req
     , response = template
+    , requestContentType = rsRequestContentType req
+    , responseContentType = rsResponseContentType req
+    , method = rsMethod req
     }
 
 instance Aeson.FromJSON RuleSpec where
@@ -60,13 +69,19 @@ instance Aeson.FromJSON RuleSpec where
     MkRuleSpec
     <$> o Aeson..: "path"
     <*> o Aeson..:? "query"
-    <*> o Aeson..: "template"
+    <*> o Aeson..: "responseTemplate"
+    <*> o Aeson..:? "requestContentType"
+    <*> o Aeson..:? "responseContentType"
+    <*> o Aeson..:? "method"
 
 instance Aeson.ToJSON RuleSpec where
   toJSON r = Aeson.object
     [ "path" Aeson..= rsPath r
     , "query" Aeson..= rsQueryRules r
-    , "template" Aeson..= rsTemplate r
+    , "responseTemplate" Aeson..= rsTemplate r
+    , "requestContentType" Aeson..= rsRequestContentType r
+    , "responseContentType" Aeson..= rsResponseContentType r
+    , "method" Aeson..= rsMethod r
     ]
 
 type QueryRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value

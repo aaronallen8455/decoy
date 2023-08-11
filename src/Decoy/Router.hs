@@ -7,12 +7,15 @@ module Decoy.Router
   , matchEndpoint
   ) where
 
-import           Control.Applicative ((<|>), asum)
+import           Control.Applicative ((<|>), empty)
 import           Control.Monad
 import qualified Data.Aeson as Aeson
+import           Data.Foldable
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Network.HTTP.Types as Http
 import qualified Text.Mustache as Stache
 
 import           Decoy.Rule
@@ -54,8 +57,15 @@ insertRule rule = go [] (pathRule rule) where
               } : endpoints router
            }
 
-matchEndpoint :: QueryParams -> Maybe Aeson.Value -> Router -> [T.Text] -> Maybe T.Text
-matchEndpoint queryParams mReqJson = go [] where
+matchEndpoint
+  :: QueryParams
+  -> Maybe Aeson.Value
+  -> Http.RequestHeaders
+  -> Http.Method
+  -> Router
+  -> [T.Text]
+  -> Maybe (T.Text, Maybe T.Text)
+matchEndpoint queryParams mReqJson reqHeaders reqMethod = go [] where
   go params router (part : rest) = static <|> wildcard where
     static = do
       r <- M.lookup part (staticPaths router)
@@ -66,9 +76,18 @@ matchEndpoint queryParams mReqJson = go [] where
   go params router [] = asum $ do
     ep <- endpoints router
     guard $ matchQuery (queryRule $ epRule ep) queryParams
+    for_ (requestContentType $ epRule ep) $ \ct ->
+      maybe empty (guard . (== ct) . TE.decodeUtf8Lenient)
+        $ lookup Http.hContentType reqHeaders
+    for_ (responseContentType $ epRule ep) $ \a ->
+      maybe empty (guard . (a `T.isInfixOf`) . TE.decodeUtf8Lenient)
+        $ lookup Http.hAccept reqHeaders
+    for_ (method $ epRule ep) $ guard . (== reqMethod) . TE.encodeUtf8
     let pathParams = M.fromList $ zip (epPathParamNames ep) params
-    pure . Just $
-      renderTemplate pathParams queryParams mReqJson (response $ epRule ep)
+    pure $ Just
+      ( renderTemplate pathParams queryParams mReqJson (response $ epRule ep)
+      , responseContentType $ epRule ep
+      )
 
 matchQuery :: QueryRules -> QueryParams -> Bool
 matchQuery queryRules queryMap = and $ (`map` M.toList queryRules) $
