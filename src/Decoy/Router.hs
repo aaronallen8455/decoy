@@ -2,8 +2,10 @@
 module Decoy.Router
   ( Router
   , mkRouter
-  , insertRules
-  , insertRule
+  , addRouterRules
+  , addRouterRule
+  , removeRouterRules
+  , removeRouterRule
   , matchEndpoint
   ) where
 
@@ -30,18 +32,18 @@ emptyRouter :: Router
 emptyRouter = RouterNode M.empty Nothing []
 
 mkRouter :: [Rule] -> Router
-mkRouter rules = insertRules rules emptyRouter
+mkRouter rules = addRouterRules rules emptyRouter
 
 data Endpoint = MkEndpoint
   { epPathParamNames :: [T.Text]
   , epRule :: Rule
   }
 
-insertRules :: [Rule] -> Router -> Router
-insertRules rules router = foldr insertRule router rules
+addRouterRules :: [Rule] -> Router -> Router
+addRouterRules rules router = foldr addRouterRule router rules
 
-insertRule :: Rule -> Router -> Router
-insertRule rule = go [] (pathRule rule) where
+addRouterRule :: Rule -> Router -> Router
+addRouterRule rule = go [] (pathRule rule) where
   go pathParams (Static pathPart : rest) router =
     let inner = fromMaybe emptyRouter . M.lookup pathPart $ staticPaths router
         r = go pathParams rest inner
@@ -56,6 +58,24 @@ insertRule rule = go [] (pathRule rule) where
               , epRule = rule
               } : endpoints router
            }
+
+removeRouterRules :: [Rule] -> Router -> Router
+removeRouterRules rules router = foldr removeRouterRule router rules
+
+removeRouterRule :: Rule -> Router -> Router
+removeRouterRule rule = go (pathRule rule) where
+  go [] router =
+    let matches r = queryRule r == queryRule rule
+                 && requestContentType r == requestContentType rule
+                 && responseContentType r == responseContentType rule
+                 && method r == method rule
+     in router { endpoints = filter (not . matches . epRule) $ endpoints router }
+  go (Static path : rest) router =
+    router { staticPaths = M.alter (fmap $ go rest) path
+                         $ staticPaths router
+           }
+  go (PathParam _ : rest) router =
+    router { paramPath = go rest <$> paramPath router }
 
 matchEndpoint
   :: QueryParams

@@ -7,6 +7,8 @@ module Decoy
   , mkRule
   , addRule
   , addRules
+  , removeRule
+  , removeRules
   , reset
     -- * Types
   , DecoyCtx(..)
@@ -30,7 +32,7 @@ import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified System.Directory as Dir
 
-import           Decoy.Router (Router, matchEndpoint, mkRouter, insertRules)
+import           Decoy.Router (Router, matchEndpoint, mkRouter, addRouterRules, removeRouterRules)
 import           Decoy.Rule (Rule, mkRule, RuleSpec(..))
 
 data DecoyCtx = DC
@@ -58,7 +60,13 @@ addRule :: DecoyCtx -> Rule -> IO ()
 addRule dc rule = addRules dc [rule]
 
 addRules :: DecoyCtx -> [Rule] -> IO ()
-addRules dc rules = modifyMVar_ (dcRouter dc) (pure . insertRules rules)
+addRules dc rules = modifyMVar_ (dcRouter dc) (pure . addRouterRules rules)
+
+removeRule :: DecoyCtx -> Rule -> IO ()
+removeRule dc rule = removeRules dc [rule]
+
+removeRules :: DecoyCtx -> [Rule] -> IO ()
+removeRules dc rules = modifyMVar_ (dcRouter dc) (pure . removeRouterRules rules)
 
 reset :: DecoyCtx -> IO ()
 reset dc =
@@ -103,7 +111,7 @@ app routerMVar mRulesFile req respHandler = do
                   . Wai.responseLBS Http.badRequest400 []
                   $ "Invalid JSON: " <> BS8.pack err
         Right rules -> do
-          modifyMVar_ routerMVar (pure . insertRules rules)
+          modifyMVar_ routerMVar (pure . addRouterRules rules)
           respHandler $ Wai.responseLBS Http.ok200 [] "Rules added"
 
     ["_reset"] -> do

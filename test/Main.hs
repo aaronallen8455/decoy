@@ -23,6 +23,9 @@ addRulesByRequest = do
                   { rsPath = "this/is/a/path"
                   , rsQueryRules = mempty
                   , rsTemplate = "This is a response"
+                  , rsResponseContentType = Nothing
+                  , rsRequestContentType = Nothing
+                  , rsMethod = Nothing
                   }
               ]
   _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
@@ -31,12 +34,20 @@ addRulesByRequest = do
 
 addRulesByApi :: DecoyCtx -> Assertion
 addRulesByApi dc = do
-  let rules = [ MkRuleSpec
+  let rules = traverse mkRule
+              [ MkRuleSpec
                   { rsPath = "this/is/another/path"
                   , rsQueryRules = mempty
                   , rsTemplate = "This is another response"
+                  , rsResponseContentType = Nothing
+                  , rsRequestContentType = Nothing
+                  , rsMethod = Nothing
                   }
               ]
-  traverse_ (addRules dc) (traverse mkRule rules)
+  traverse_ (addRules dc) rules
   resp <- httpBS "GET http://localhost:9000/this/is/another/path"
   getResponseBody resp @?= "This is another response"
+
+  traverse_ (removeRules dc) rules
+  resp2 <- httpBS "GET http://localhost:9000/this/is/another/path"
+  getResponseStatusCode resp2 @?= 404
