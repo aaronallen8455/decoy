@@ -12,8 +12,12 @@ module Decoy
   , reset
     -- * Types
   , DecoyCtx(..)
+  , RuleF(..)
   , Rule
-  , RuleSpec(..)
+  , RuleSpec
+  , Response(..)
+  , Request(..)
+  , ResponseBody(..)
   , Router
   ) where
 
@@ -26,6 +30,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as BS8
 import qualified Data.Map.Strict as M
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Network.HTTP.Types as Http
 import qualified Network.Wai as Wai
@@ -33,7 +38,7 @@ import qualified Network.Wai.Handler.Warp as Warp
 import qualified System.Directory as Dir
 
 import           Decoy.Router (Router, matchEndpoint, mkRouter, addRouterRules, removeRouterRules)
-import           Decoy.Rule (Rule, mkRule, RuleSpec(..))
+import           Decoy.Rule (Request(..), Response(..), ResponseBody(..), RuleF(..), Rule, RuleSpec, mkRule)
 
 data DecoyCtx = DC
   { dcRouter :: MVar Router
@@ -120,14 +125,30 @@ app routerMVar mRulesFile req respHandler = do
 
     _ -> do
       router <- readMVar routerMVar
-      respHandler $
+      respHandler =<<
         case eReqBodyJson of
-          Left err -> Wai.responseLBS Http.badRequest400 []
+          Left err -> pure . Wai.responseLBS Http.badRequest400 []
                         $ "Invalid JSON: " <> BS8.pack err
           Right mReqJson ->
             case matchEndpoint queryMap mReqJson reqHeaders reqMethod router reqPath of
-              Nothing -> Wai.responseLBS Http.notFound404 [] "No rule matched"
-              Just (resp, mContentType) ->
-                Wai.responseLBS Http.ok200
-                  [ (Http.hContentType, TE.encodeUtf8 ct) | Just ct <- [mContentType] ]
-                  (LBS.fromStrict $ TE.encodeUtf8 resp)
+              Nothing -> pure $ Wai.responseLBS Http.notFound404 [] "No rule matched"
+              Just matched -> uncurry handleMatchedEndpoint matched
+
+handleMatchedEndpoint :: ResponseBody T.Text -> Maybe T.Text -> IO Wai.Response
+handleMatchedEndpoint rb mContentType =
+  case rb of
+    Template resp -> pure $
+      Wai.responseLBS Http.ok200
+        respHeaders
+        (LBS.fromStrict $ TE.encodeUtf8 resp)
+    File file -> do
+      exists <- Dir.doesFileExist file
+      if not exists
+         then pure $
+           Wai.responseLBS Http.notFound404 [] $ "File not found: " <> BS8.pack file
+         else do
+           content <- LBS.readFile file
+           pure $ Wai.responseLBS Http.ok200 respHeaders content
+  where
+    respHeaders =
+      [ (Http.hContentType, TE.encodeUtf8 ct) | Just ct <- [mContentType] ]

@@ -1,31 +1,51 @@
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Decoy.Rule
-  ( Rule(..)
-  , RuleSpec(..)
+  ( RuleF(..)
+  , Rule
+  , RuleSpec
+  , Response(..)
+  , ResponseBody(..)
+  , Request(..)
   , mkRule
   , QueryRules
   , PathPart(..)
   ) where
 
-import qualified Data.Aeson as Aeson
+import           Data.Aeson
 import           Data.Bifunctor (first)
 import qualified Data.Map.Strict as M
-import           Data.Maybe
 import qualified Data.Text as T
 import qualified Text.Mustache as Stache
 
-data Rule = MkRule
-  { pathRule :: [PathPart]
-  , queryRule :: QueryRules
-  , response :: Stache.Template
-  , requestContentType :: Maybe T.Text
-  , responseContentType :: Maybe T.Text
-  , method :: Maybe T.Text
-  }
+type Rule = RuleF [PathPart] Stache.Template
+
+data RuleF path template = MkRule
+  { request :: Request path
+  , response :: Response template
+  } deriving (Eq, Functor)
+
+data Request path = MkRequest
+  { reqPath :: path
+  , reqQuery :: QueryRules
+  , reqMethod :: Maybe T.Text
+  , reqContentType :: Maybe T.Text
+  } deriving (Eq, Functor)
+
+data Response template = MkResponse
+  { respBody :: ResponseBody template
+  , respContentType :: Maybe T.Text
+  } deriving (Eq, Functor, Foldable, Traversable)
+
+data ResponseBody t
+  = File FilePath
+  | Template t -- Stach.Template
+  deriving (Eq, Functor, Foldable, Traversable)
 
 data PathPart
   = Static T.Text
   | PathParam T.Text
+  deriving Eq
 
 pathFromText :: T.Text -> [PathPart]
 pathFromText txt = parsePart <$> T.split (== '/') txt
@@ -42,46 +62,66 @@ pathFromText txt = parsePart <$> T.split (== '/') txt
 --       Static t -> t
 --       PathParam t -> ":" <> t
 
-data RuleSpec = MkRuleSpec
-  { rsPath :: T.Text
-  , rsQueryRules :: Maybe QueryRules
-  , rsTemplate :: T.Text
-  , rsRequestContentType :: Maybe T.Text
-  , rsResponseContentType :: Maybe T.Text
-  , rsMethod :: Maybe T.Text
-  }
+type RuleSpec = RuleF T.Text T.Text
 
 mkRule :: RuleSpec -> Either String Rule
-mkRule req = do
-  template <- first show . Stache.compileTemplate ""
-            $ rsTemplate req
+mkRule rs = do
+  body <- traverse (first show . Stache.compileTemplate "") $ response rs
+
   Right MkRule
-    { pathRule = pathFromText $ rsPath req
-    , queryRule = fromMaybe M.empty $ rsQueryRules req
-    , response = template
-    , requestContentType = rsRequestContentType req
-    , responseContentType = rsResponseContentType req
-    , method = rsMethod req
+    { response = body
+    , request = pathFromText <$> request rs
     }
 
-instance Aeson.FromJSON RuleSpec where
-  parseJSON = Aeson.withObject "Rule Request" $ \o ->
-    MkRuleSpec
-    <$> o Aeson..: "path"
-    <*> o Aeson..:? "query"
-    <*> o Aeson..: "responseTemplate"
-    <*> o Aeson..:? "requestContentType"
-    <*> o Aeson..:? "responseContentType"
-    <*> o Aeson..:? "method"
+instance FromJSON RuleSpec where
+  parseJSON = withObject "Rule" $ \o ->
+    MkRule
+    <$> o .: "request"
+    <*> o .: "response"
 
-instance Aeson.ToJSON RuleSpec where
-  toJSON r = Aeson.object
-    [ "path" Aeson..= rsPath r
-    , "query" Aeson..= rsQueryRules r
-    , "responseTemplate" Aeson..= rsTemplate r
-    , "requestContentType" Aeson..= rsRequestContentType r
-    , "responseContentType" Aeson..= rsResponseContentType r
-    , "method" Aeson..= rsMethod r
+instance FromJSON (Response T.Text) where
+  parseJSON = withObject "Response" $ \o -> do
+    ty <- o .: "type"
+    val <- o .: "body"
+    MkResponse
+      <$> ( case ty :: String of
+              "file" -> pure $ File val
+              "template" -> pure . Template $ T.pack val
+              _ -> fail $ "invalid response body type: " <> ty
+          )
+      <*> o .:? "contentType"
+
+instance FromJSON (Request T.Text) where
+  parseJSON = withObject "Request" $ \o ->
+    MkRequest
+    <$> o .: "path"
+    <*> o .:? "query" .!= mempty
+    <*> o .:? "method"
+    <*> o .:? "contentType"
+
+instance ToJSON RuleSpec where
+  toJSON rs = object
+    [ "request" .= request rs
+    , "response" .= response rs
+    ]
+
+instance ToJSON (Response T.Text) where
+  toJSON r = object
+    [ "type" .= (case respBody r of
+                  Template{} -> ("template" :: T.Text)
+                  File{} -> "file")
+    , "body" .= (case respBody r of
+                  Template t -> t
+                  File f -> T.pack f)
+    , "contentType" .= respContentType r
+    ]
+
+instance ToJSON (Request T.Text) where
+  toJSON r = object
+    [ "path" .= reqPath r
+    , "query" .= reqQuery r
+    , "method" .= reqMethod r
+    , "contentType" .= reqContentType r
     ]
 
 type QueryRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value

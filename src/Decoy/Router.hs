@@ -43,7 +43,7 @@ addRouterRules :: [Rule] -> Router -> Router
 addRouterRules rules router = foldr addRouterRule router rules
 
 addRouterRule :: Rule -> Router -> Router
-addRouterRule rule = go [] (pathRule rule) where
+addRouterRule rule = go [] (reqPath $ request rule) where
   go pathParams (Static pathPart : rest) router =
     let inner = fromMaybe emptyRouter . M.lookup pathPart $ staticPaths router
         r = go pathParams rest inner
@@ -63,12 +63,9 @@ removeRouterRules :: [Rule] -> Router -> Router
 removeRouterRules rules router = foldr removeRouterRule router rules
 
 removeRouterRule :: Rule -> Router -> Router
-removeRouterRule rule = go (pathRule rule) where
+removeRouterRule rule = go (reqPath $ request rule) where
   go [] router =
-    let matches r = queryRule r == queryRule rule
-                 && requestContentType r == requestContentType rule
-                 && responseContentType r == responseContentType rule
-                 && method r == method rule
+    let matches r = void r == void rule
      in router { endpoints = filter (not . matches . epRule) $ endpoints router }
   go (Static path : rest) router =
     router { staticPaths = M.alter (fmap $ go rest) path
@@ -84,8 +81,8 @@ matchEndpoint
   -> Http.Method
   -> Router
   -> [T.Text]
-  -> Maybe (T.Text, Maybe T.Text)
-matchEndpoint queryParams mReqJson reqHeaders reqMethod = go [] where
+  -> Maybe (ResponseBody T.Text, Maybe T.Text)
+matchEndpoint queryParams mReqJson reqHeaders reqMeth = go [] where
   go params router (part : rest) = static <|> wildcard where
     static = do
       r <- M.lookup part (staticPaths router)
@@ -95,18 +92,20 @@ matchEndpoint queryParams mReqJson reqHeaders reqMethod = go [] where
       go (part : params) r rest
   go params router [] = asum $ do
     ep <- endpoints router
-    guard $ matchQuery (queryRule $ epRule ep) queryParams
-    for_ (requestContentType $ epRule ep) $ \ct ->
+    guard $ matchQuery (reqQuery . request $ epRule ep) queryParams
+    for_ (reqContentType . request $ epRule ep) $ \ct ->
       maybe empty (guard . (== ct) . TE.decodeUtf8Lenient)
         $ lookup Http.hContentType reqHeaders
-    for_ (responseContentType $ epRule ep) $ \a ->
+    for_ (respContentType . response $ epRule ep) $ \a ->
       maybe empty (guard . (a `T.isInfixOf`) . TE.decodeUtf8Lenient)
         $ lookup Http.hAccept reqHeaders
-    for_ (method $ epRule ep) $ guard . (== reqMethod) . TE.encodeUtf8
+    for_ (reqMethod . request $ epRule ep)
+      $ guard . (== reqMeth) . TE.encodeUtf8
     let pathParams = M.fromList $ zip (epPathParamNames ep) params
     pure $ Just
-      ( renderTemplate pathParams queryParams mReqJson (response $ epRule ep)
-      , responseContentType $ epRule ep
+      ( renderTemplate pathParams queryParams mReqJson
+          <$> respBody (response $ epRule ep)
+      , respContentType . response $ epRule ep
       )
 
 matchQuery :: QueryRules -> QueryParams -> Bool

@@ -70,4 +70,5 @@ test-suite decoy-test
         decoy,
         tasty,
         tasty-hunit,
-        http-conduit
+        http-conduit,
+        text

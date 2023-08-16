@@ -2,6 +2,7 @@
 module Main (main) where
 
 import           Data.Foldable
+import qualified Data.Text as T
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import           Network.HTTP.Simple
@@ -19,35 +20,36 @@ tests dc = testGroup "Tests"
 
 addRulesByRequest :: Assertion
 addRulesByRequest = do
-  let rules = [ MkRuleSpec
-                  { rsPath = "this/is/a/path"
-                  , rsQueryRules = mempty
-                  , rsTemplate = "This is a response"
-                  , rsResponseContentType = Nothing
-                  , rsRequestContentType = Nothing
-                  , rsMethod = Nothing
-                  }
-              ]
-  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
+  let rule = MkRule
+        { request = MkRequest { reqPath = "this/is/a/path" :: T.Text
+                              , reqQuery = mempty
+                              , reqMethod = Nothing
+                              , reqContentType = Nothing
+                              }
+        , response = MkResponse { respBody = Template ("This is a response" :: T.Text)
+                                , respContentType = Nothing
+                                }
+        }
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
   resp <- httpBS "GET http://localhost:9000/this/is/a/path"
   getResponseBody resp @?= "This is a response"
 
 addRulesByApi :: DecoyCtx -> Assertion
 addRulesByApi dc = do
-  let rules = traverse mkRule
-              [ MkRuleSpec
-                  { rsPath = "this/is/another/path"
-                  , rsQueryRules = mempty
-                  , rsTemplate = "This is another response"
-                  , rsResponseContentType = Nothing
-                  , rsRequestContentType = Nothing
-                  , rsMethod = Nothing
-                  }
-              ]
-  traverse_ (addRules dc) rules
+  let rules = mkRule MkRule
+        { request = MkRequest { reqPath = "this/is/another/path"
+                              , reqQuery = mempty
+                              , reqMethod = Nothing
+                              , reqContentType = Nothing
+                              }
+        , response = MkResponse { respBody = Template "This is another response"
+                                , respContentType = Nothing
+                                }
+        }
+  traverse_ (addRule dc) rules
   resp <- httpBS "GET http://localhost:9000/this/is/another/path"
   getResponseBody resp @?= "This is another response"
 
-  traverse_ (removeRules dc) rules
+  traverse_ (removeRule dc) rules
   resp2 <- httpBS "GET http://localhost:9000/this/is/another/path"
   getResponseStatusCode resp2 @?= 404
