@@ -36,7 +36,7 @@ addRulesByRequest = do
 
 addRulesByApi :: DecoyCtx -> Assertion
 addRulesByApi dc = do
-  let rules = mkRule MkRule
+  let rules = compileRule MkRule
         { request = MkRequest { reqPath = "this/is/another/path"
                               , reqQuery = mempty
                               , reqMethod = Nothing

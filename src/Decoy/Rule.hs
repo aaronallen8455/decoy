@@ -7,7 +7,7 @@ module Decoy.Rule
   , Response(..)
   , ResponseBody(..)
   , Request(..)
-  , mkRule
+  , compileRule
   , QueryRules
   , PathPart(..)
   ) where
@@ -64,8 +64,8 @@ pathFromText txt = parsePart <$> T.split (== '/') txt
 
 type RuleSpec = RuleF T.Text T.Text
 
-mkRule :: RuleSpec -> Either String Rule
-mkRule rs = do
+compileRule :: RuleSpec -> Either String Rule
+compileRule rs = do
   body <- traverse (first show . Stache.compileTemplate "") $ response rs
 
   Right MkRule

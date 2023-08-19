@@ -4,7 +4,6 @@ module Decoy
     withDecoyServer
   , runDecoyServer
     -- * Modify a running instance
-  , mkRule
   , addRule
   , addRules
   , removeRule
@@ -12,13 +11,8 @@ module Decoy
   , reset
     -- * Types
   , DecoyCtx(..)
-  , RuleF(..)
-  , Rule
-  , RuleSpec
-  , Response(..)
-  , Request(..)
-  , ResponseBody(..)
   , Router
+  , module Rule
   ) where
 
 import qualified Control.Concurrent.Async as Async
@@ -38,7 +32,7 @@ import qualified Network.Wai.Handler.Warp as Warp
 import qualified System.Directory as Dir
 
 import           Decoy.Router (Router, matchEndpoint, mkRouter, addRouterRules, removeRouterRules)
-import           Decoy.Rule (Request(..), Response(..), ResponseBody(..), RuleF(..), Rule, RuleSpec, mkRule)
+import           Decoy.Rule as Rule
 
 data DecoyCtx = DC
   { dcRouter :: MVar Router
@@ -85,7 +79,7 @@ loadRulesFile (Just rulesFile) = do
   if rulesFileExists
      then do
        values <- Aeson.eitherDecodeFileStrict rulesFile
-       case traverse mkRule =<< values of
+       case traverse compileRule =<< values of
          Left err -> fail $ "Failed to parse rules file: " <> err
          Right rules -> pure rules
      else fail $ "File does not exist: " <> rulesFile
@@ -108,7 +102,7 @@ app routerMVar mRulesFile req respHandler = do
 
   case reqPath of
     ["_rules"] ->
-      case traverse mkRule
+      case traverse compileRule
              =<< Aeson.parseEither Aeson.parseJSON
              =<< maybe (Left "No body") Right
              =<< eReqBodyJson of
