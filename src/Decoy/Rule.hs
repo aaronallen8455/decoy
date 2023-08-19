@@ -7,6 +7,8 @@ module Decoy.Rule
   , Response(..)
   , ResponseBody(..)
   , Request(..)
+  , JsonPathOpts(..)
+  , BodyRule(..)
   , compileRule
   , QueryRules
   , PathPart(..)
@@ -14,23 +16,42 @@ module Decoy.Rule
 
 import           Data.Aeson
 import           Data.Bifunctor (first)
+import qualified Data.JSONPath as JP
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
+import qualified Text.Megaparsec as P
 import qualified Text.Mustache as Stache
 
-type Rule = RuleF [PathPart] Stache.Template
+type Rule = RuleF [PathPart] [JP.JSONPathElement] Stache.Template
 
-data RuleF path template = MkRule
-  { request :: Request path
+data RuleF urlPath jsonPath template = MkRule
+  { request :: Request urlPath jsonPath
   , response :: Response template
   } deriving (Eq, Functor)
 
-data Request path = MkRequest
-  { reqPath :: path
+data Request urlPath jsonPath = MkRequest
+  { reqPath :: urlPath
   , reqQuery :: QueryRules
   , reqMethod :: Maybe T.Text
   , reqContentType :: Maybe T.Text
-  } deriving (Eq, Functor)
+  , reqBodyRules :: [BodyRule jsonPath]
+  } deriving (Eq, Functor, Foldable, Traversable)
+
+data JsonPathOpts jsonPath = MkJsonPathOpts
+  { jsonPath :: jsonPath
+    -- ^ a JSON path which must match at least one element of the request body.
+  , allTargetsMustMatch :: Bool
+    -- ^ If True, all elements matched by the given JSON path must satisfy the rule.
+    -- If False, at least one element must satisfy the rule.
+  } deriving (Eq, Functor, Foldable, Traversable)
+
+data BodyRule jsonPath = MkBodyRule
+  { jsonPathOpts :: Maybe (JsonPathOpts jsonPath)
+    -- ^ For JSON request bodies, specify a JSON path to where the regex should
+    -- be matched
+  , regex :: T.Text
+    -- ^ A regular expression that must be matched against
+  } deriving (Eq, Functor, Foldable, Traversable)
 
 data Response template = MkResponse
   { respBody :: ResponseBody template
@@ -62,25 +83,27 @@ pathFromText txt = parsePart <$> T.split (== '/') txt
 --       Static t -> t
 --       PathParam t -> ":" <> t
 
-type RuleSpec = RuleF T.Text T.Text
+type RuleSpec = RuleF T.Text T.Text T.Text
 
 compileRule :: RuleSpec -> Either String Rule
 compileRule rs = do
   body <- traverse (first show . Stache.compileTemplate "") $ response rs
+  req <- traverse (first P.errorBundlePretty . P.runParser (JP.jsonPath P.eof) "")
+       $ request rs
 
   Right MkRule
     { response = body
-    , request = pathFromText <$> request rs
+    , request = req { reqPath = pathFromText $ reqPath req }
     }
 
 instance FromJSON RuleSpec where
-  parseJSON = withObject "Rule" $ \o ->
+  parseJSON = withObject "rule" $ \o ->
     MkRule
     <$> o .: "request"
     <*> o .: "response"
 
 instance FromJSON (Response T.Text) where
-  parseJSON = withObject "Response" $ \o -> do
+  parseJSON = withObject "response" $ \o -> do
     ty <- o .: "type"
     val <- o .: "body"
     MkResponse
@@ -91,13 +114,26 @@ instance FromJSON (Response T.Text) where
           )
       <*> o .:? "contentType"
 
-instance FromJSON (Request T.Text) where
-  parseJSON = withObject "Request" $ \o ->
+instance FromJSON (Request T.Text T.Text) where
+  parseJSON = withObject "request" $ \o ->
     MkRequest
     <$> o .: "path"
     <*> o .:? "query" .!= mempty
     <*> o .:? "method"
     <*> o .:? "contentType"
+    <*> o .:? "bodyRules" .!= []
+
+instance FromJSON (JsonPathOpts T.Text) where
+  parseJSON = withObject "JSON path opts" $ \o ->
+    MkJsonPathOpts
+    <$> o .: "jsonPath"
+    <*> o .:? "allTargetsMustMatch" .!= True
+
+instance FromJSON (BodyRule T.Text) where
+  parseJSON = withObject "body rule" $ \o ->
+    MkBodyRule
+    <$> o .:? "jsonPathOpts"
+    <*> o .: "regex"
 
 instance ToJSON RuleSpec where
   toJSON rs = object
@@ -116,12 +152,25 @@ instance ToJSON (Response T.Text) where
     , "contentType" .= respContentType r
     ]
 
-instance ToJSON (Request T.Text) where
+instance ToJSON (Request T.Text T.Text) where
   toJSON r = object
     [ "path" .= reqPath r
     , "query" .= reqQuery r
     , "method" .= reqMethod r
     , "contentType" .= reqContentType r
+    , "bodyRules" .= reqBodyRules r
+    ]
+
+instance ToJSON (BodyRule T.Text) where
+  toJSON r = object
+    [ "jsonPathOpts" .= jsonPathOpts r
+    , "regex" .= regex r
+    ]
+
+instance ToJSON (JsonPathOpts T.Text) where
+  toJSON o = object
+    [ "jsonPath" .= jsonPath o
+    , "allTargetsMustMatch" .= allTargetsMustMatch o
     ]
 
 type QueryRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value

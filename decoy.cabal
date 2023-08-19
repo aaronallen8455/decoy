@@ -32,7 +32,10 @@ library
                       containers,
                       http-types,
                       aeson,
-                      directory
+                      directory,
+                      jsonpath,
+                      regex-tdfa,
+                      megaparsec
     hs-source-dirs:   src
     default-language: GHC2021
 

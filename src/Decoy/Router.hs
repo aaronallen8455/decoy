@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
+
 module Decoy.Router
   ( Router
   , mkRouter
@@ -12,13 +14,16 @@ module Decoy.Router
 import           Control.Applicative ((<|>), empty)
 import           Control.Monad
 import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy as LBS
 import           Data.Foldable
+import qualified Data.JSONPath as JP
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Network.HTTP.Types as Http
 import qualified Text.Mustache as Stache
+import qualified Text.Regex.TDFA as Regex
 
 import           Decoy.Rule
 
@@ -76,13 +81,14 @@ removeRouterRule rule = go (reqPath $ request rule) where
 
 matchEndpoint
   :: QueryParams
+  -> LBS.ByteString
   -> Maybe Aeson.Value
   -> Http.RequestHeaders
   -> Http.Method
   -> Router
   -> [T.Text]
   -> Maybe (ResponseBody T.Text, Maybe T.Text)
-matchEndpoint queryParams mReqJson reqHeaders reqMeth = go [] where
+matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
   go params router (part : rest) = static <|> wildcard where
     static = do
       r <- M.lookup part (staticPaths router)
@@ -92,21 +98,41 @@ matchEndpoint queryParams mReqJson reqHeaders reqMeth = go [] where
       go (part : params) r rest
   go params router [] = asum $ do
     ep <- endpoints router
+
     guard $ matchQuery (reqQuery . request $ epRule ep) queryParams
+
     for_ (reqContentType . request $ epRule ep) $ \ct ->
       maybe empty (guard . (== ct) . TE.decodeUtf8Lenient)
         $ lookup Http.hContentType reqHeaders
+
     for_ (respContentType . response $ epRule ep) $ \a ->
       maybe empty (guard . (a `T.isInfixOf`) . TE.decodeUtf8Lenient)
         $ lookup Http.hAccept reqHeaders
+
     for_ (reqMethod . request $ epRule ep)
       $ guard . (== reqMeth) . TE.encodeUtf8
+
+    guard $ matchBody (reqBodyRules (request $ epRule ep)) rawBody mReqJson
+
     let pathParams = M.fromList $ zip (epPathParamNames ep) params
     pure $ Just
       ( renderTemplate pathParams queryParams mReqJson
           <$> respBody (response $ epRule ep)
       , respContentType . response $ epRule ep
       )
+
+matchBody :: [BodyRule [JP.JSONPathElement]] -> LBS.ByteString -> Maybe Aeson.Value -> Bool
+matchBody bodyRules rawBody mBodyJson = all match bodyRules where
+  match rule = case jsonPathOpts rule of
+    Nothing -> rawBody Regex.=~ regex rule
+    Just opts | Just bodyJson <- mBodyJson
+              , let op = if allTargetsMustMatch opts
+                            then (\p xs -> all p xs && not (null xs))
+                            else any
+      -> (`op` JP.executeJSONPath (jsonPath opts) bodyJson) $ \case
+          Aeson.String txt -> txt Regex.=~ regex rule
+          other -> Aeson.encode other Regex.=~ regex rule
+    _ -> False
 
 matchQuery :: QueryRules -> QueryParams -> Bool
 matchQuery queryRules queryMap = and $ (`map` M.toList queryRules) $

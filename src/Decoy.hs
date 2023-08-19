@@ -124,7 +124,7 @@ app routerMVar mRulesFile req respHandler = do
           Left err -> pure . Wai.responseLBS Http.badRequest400 []
                         $ "Invalid JSON: " <> BS8.pack err
           Right mReqJson ->
-            case matchEndpoint queryMap mReqJson reqHeaders reqMethod router reqPath of
+            case matchEndpoint queryMap reqBodyBS mReqJson reqHeaders reqMethod router reqPath of
               Nothing -> pure $ Wai.responseLBS Http.notFound404 [] "No rule matched"
               Just matched -> uncurry handleMatchedEndpoint matched
 
