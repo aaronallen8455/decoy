@@ -102,7 +102,7 @@ matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
     guard $ matchQuery (reqQuery . request $ epRule ep) queryParams
 
     for_ (reqContentType . request $ epRule ep) $ \ct ->
-      maybe empty (guard . (== ct) . TE.decodeUtf8Lenient)
+      maybe empty (guard . (ct `T.isInfixOf`) . TE.decodeUtf8Lenient)
         $ lookup Http.hContentType reqHeaders
 
     for_ (respContentType . response $ epRule ep) $ \a ->
@@ -126,7 +126,7 @@ matchBody bodyRules rawBody mBodyJson = all match bodyRules where
   match rule = case jsonPathOpts rule of
     Nothing -> rawBody Regex.=~ regex rule
     Just opts | Just bodyJson <- mBodyJson
-              , let op = if allTargetsMustMatch opts
+              , let op = if allMatch opts
                             then (\p xs -> all p xs && not (null xs))
                             else any
       -> (`op` JP.executeJSONPath (jsonPath opts) bodyJson) $ \case

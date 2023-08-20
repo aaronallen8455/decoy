@@ -74,4 +74,7 @@ test-suite decoy-test
         tasty,
         tasty-hunit,
         http-conduit,
-        text
+        http-types,
+        text,
+        aeson,
+        aeson-qq

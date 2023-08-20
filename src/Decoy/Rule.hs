@@ -40,7 +40,7 @@ data Request urlPath jsonPath = MkRequest
 data JsonPathOpts jsonPath = MkJsonPathOpts
   { jsonPath :: jsonPath
     -- ^ a JSON path which must match at least one element of the request body.
-  , allTargetsMustMatch :: Bool
+  , allMatch :: Bool
     -- ^ If True, all elements matched by the given JSON path must satisfy the rule.
     -- If False, at least one element must satisfy the rule.
   } deriving (Eq, Functor, Foldable, Traversable)
@@ -127,7 +127,7 @@ instance FromJSON (JsonPathOpts T.Text) where
   parseJSON = withObject "JSON path opts" $ \o ->
     MkJsonPathOpts
     <$> o .: "jsonPath"
-    <*> o .:? "allTargetsMustMatch" .!= True
+    <*> o .:? "allMatch" .!= True
 
 instance FromJSON (BodyRule T.Text) where
   parseJSON = withObject "body rule" $ \o ->
@@ -170,7 +170,7 @@ instance ToJSON (BodyRule T.Text) where
 instance ToJSON (JsonPathOpts T.Text) where
   toJSON o = object
     [ "jsonPath" .= jsonPath o
-    , "allTargetsMustMatch" .= allTargetsMustMatch o
+    , "allMatch" .= allMatch o
     ]
 
 type QueryRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value
