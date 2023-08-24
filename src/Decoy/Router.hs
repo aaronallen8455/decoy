@@ -9,6 +9,7 @@ module Decoy.Router
   , removeRouterRules
   , removeRouterRule
   , matchEndpoint
+  , MatchedEndpoint(..)
   ) where
 
 import           Control.Applicative ((<|>), empty)
@@ -79,6 +80,12 @@ removeRouterRule rule = go (reqPath $ request rule) where
   go (PathParam _ : rest) router =
     router { paramPath = go rest <$> paramPath router }
 
+data MatchedEndpoint = MkMatchedEndpoint
+  { responseBody :: ResponseBody T.Text
+  , contentType :: Maybe T.Text
+  , statusCode :: Maybe Word
+  }
+
 matchEndpoint
   :: QueryParams
   -> LBS.ByteString
@@ -87,7 +94,7 @@ matchEndpoint
   -> Http.Method
   -> Router
   -> [T.Text]
-  -> Maybe (ResponseBody T.Text, Maybe T.Text)
+  -> Maybe MatchedEndpoint
 matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
   go params router (part : rest) = static <|> wildcard where
     static = do
@@ -101,11 +108,12 @@ matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
 
     guard $ matchQuery (reqQuery . request $ epRule ep) queryParams
 
+    let resp = response $ epRule ep
     for_ (reqContentType . request $ epRule ep) $ \ct ->
       maybe empty (guard . (ct `T.isInfixOf`) . TE.decodeUtf8Lenient)
         $ lookup Http.hContentType reqHeaders
 
-    for_ (respContentType . response $ epRule ep) $ \a ->
+    for_ (respContentType resp) $ \a ->
       maybe empty (guard . (a `T.isInfixOf`) . TE.decodeUtf8Lenient)
         $ lookup Http.hAccept reqHeaders
 
@@ -115,11 +123,12 @@ matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
     guard $ matchBody (reqBodyRules (request $ epRule ep)) rawBody mReqJson
 
     let pathParams = M.fromList $ zip (epPathParamNames ep) params
-    pure $ Just
-      ( renderTemplate pathParams queryParams mReqJson
-          <$> respBody (response $ epRule ep)
-      , respContentType . response $ epRule ep
-      )
+    pure $ Just MkMatchedEndpoint
+      { responseBody = renderTemplate pathParams queryParams mReqJson
+                   <$> respBody resp
+      , contentType = respContentType resp
+      , statusCode = respStatusCode resp
+      }
 
 matchBody :: [BodyRule [JP.JSONPathElement]] -> LBS.ByteString -> Maybe Aeson.Value -> Bool
 matchBody bodyRules rawBody mBodyJson = all match bodyRules where

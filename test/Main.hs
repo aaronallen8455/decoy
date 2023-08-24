@@ -25,6 +25,7 @@ tests dc = testGroup "Tests"
   , testCase "Request method" requestMethod
   , testCase "Request content type" reqCT
   , testCase "Response content type" respCT
+  , testCase "Status code" respStatus
   ]
 
 addRulesByRequest :: Assertion
@@ -38,6 +39,7 @@ addRulesByRequest = do
                               }
         , response = MkResponse { respBody = Template ("This is a response" :: T.Text)
                                 , respContentType = Nothing
+                                , respStatusCode = Nothing
                                 }
         } :: RuleSpec
   _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
@@ -55,6 +57,7 @@ addRulesByApi dc = do
                               }
         , response = MkResponse { respBody = Template "This is another response"
                                 , respContentType = Nothing
+                                , respStatusCode = Nothing
                                 }
         }
   traverse_ (addRule dc) rules
@@ -81,6 +84,7 @@ bodyRegex = do
                               }
         , response = MkResponse { respBody = Template ("regex matched" :: T.Text)
                                 , respContentType = Nothing
+                                , respStatusCode = Nothing
                                 }
         } :: RuleSpec
   _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
@@ -106,6 +110,7 @@ jsonRegex = do
                               }
         , response = MkResponse { respBody = Template ("json regex matched" :: T.Text)
                                 , respContentType = Nothing
+                                , respStatusCode = Nothing
                                 }
         } :: RuleSpec
   _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
@@ -126,6 +131,7 @@ requestMethod = do
                               }
         , response = MkResponse { respBody = Template ("get" :: T.Text)
                                 , respContentType = Nothing
+                                , respStatusCode = Nothing
                                 }
         }
         , MkRule
@@ -137,6 +143,7 @@ requestMethod = do
                               }
         , response = MkResponse { respBody = Template ("post" :: T.Text)
                                 , respContentType = Nothing
+                                , respStatusCode = Nothing
                                 }
         } ] :: [RuleSpec]
   _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
@@ -155,6 +162,7 @@ reqCT = do
                               }
         , response = MkResponse { respBody = Template ("text" :: T.Text)
                                 , respContentType = Nothing
+                                , respStatusCode = Nothing
                                 }
         }
         , MkRule
@@ -166,6 +174,7 @@ reqCT = do
                               }
         , response = MkResponse { respBody = Template ("json" :: T.Text)
                                 , respContentType = Nothing
+                                , respStatusCode = Nothing
                                 }
         } ] :: [RuleSpec]
   _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
@@ -184,6 +193,7 @@ respCT = do
                               }
         , response = MkResponse { respBody = Template ("text" :: T.Text)
                                 , respContentType = Just "text/plain"
+                                , respStatusCode = Nothing
                                 }
         }
         , MkRule
@@ -195,6 +205,7 @@ respCT = do
                               }
         , response = MkResponse { respBody = Template ("\"json\"" :: T.Text)
                                 , respContentType = Just "application/json"
+                                , respStatusCode = Nothing
                                 }
         } ] :: [RuleSpec]
   _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
@@ -202,3 +213,22 @@ respCT = do
   getResponseBody resp @?= Aeson.String "json"
   resp2 <- httpBS (addRequestHeader H.hAccept "text/plain" "GET http://localhost:9000/respct")
   getResponseBody resp2 @?= "text"
+
+respStatus :: Assertion
+respStatus = do
+  let rule =
+        MkRule
+        { request = MkRequest { reqPath = "statusc" :: T.Text
+                              , reqQuery = mempty
+                              , reqMethod = Nothing
+                              , reqContentType = Nothing
+                              , reqBodyRules = []
+                              }
+        , response = MkResponse { respBody = Template ("text" :: T.Text)
+                                , respContentType = Nothing
+                                , respStatusCode = Just 500
+                                }
+        } :: RuleSpec
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
+  resp <- httpBS "GET http://localhost:9000/statusc"
+  getResponseStatusCode resp @?= 500

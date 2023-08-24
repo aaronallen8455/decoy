@@ -56,6 +56,7 @@ data BodyRule jsonPath = MkBodyRule
 data Response template = MkResponse
   { respBody :: ResponseBody template
   , respContentType :: Maybe T.Text
+  , respStatusCode :: Maybe Word
   } deriving (Eq, Functor, Foldable, Traversable)
 
 data ResponseBody t
@@ -113,6 +114,7 @@ instance FromJSON (Response T.Text) where
               _ -> fail $ "invalid response body type: " <> ty
           )
       <*> o .:? "contentType"
+      <*> o .:? "statusCode"
 
 instance FromJSON (Request T.Text T.Text) where
   parseJSON = withObject "request" $ \o ->
@@ -150,6 +152,7 @@ instance ToJSON (Response T.Text) where
                   Template t -> t
                   File f -> T.pack f)
     , "contentType" .= respContentType r
+    , "statusCode" .= respStatusCode r
     ]
 
 instance ToJSON (Request T.Text T.Text) where

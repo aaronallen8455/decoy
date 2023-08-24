@@ -11,7 +11,7 @@ module Decoy
   , reset
     -- * Types
   , DecoyCtx(..)
-  , Router
+  , R.Router
   , module Rule
   ) where
 
@@ -24,18 +24,17 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as BS8
 import qualified Data.Map.Strict as M
-import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Network.HTTP.Types as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified System.Directory as Dir
 
-import           Decoy.Router (Router, matchEndpoint, mkRouter, addRouterRules, removeRouterRules)
+import qualified Decoy.Router as R
 import           Decoy.Rule as Rule
 
 data DecoyCtx = DC
-  { dcRouter :: MVar Router
+  { dcRouter :: MVar R.Router
   , dcAsync :: Async ()
   , dcRulesFile :: Maybe FilePath
   }
@@ -43,7 +42,7 @@ data DecoyCtx = DC
 withDecoyServer :: Warp.Port -> Maybe FilePath -> (DecoyCtx -> IO a) -> IO a
 withDecoyServer port mRulesFile cont = do
   rules <- loadRulesFile mRulesFile
-  initRouterMVar <- newMVar $ mkRouter rules
+  initRouterMVar <- newMVar $ R.mkRouter rules
   Async.withAsync (Warp.run port $ app initRouterMVar mRulesFile) $ \async ->
     cont DC
       { dcRouter = initRouterMVar
@@ -59,17 +58,17 @@ addRule :: DecoyCtx -> Rule -> IO ()
 addRule dc rule = addRules dc [rule]
 
 addRules :: DecoyCtx -> [Rule] -> IO ()
-addRules dc rules = modifyMVar_ (dcRouter dc) (pure . addRouterRules rules)
+addRules dc rules = modifyMVar_ (dcRouter dc) (pure . R.addRouterRules rules)
 
 removeRule :: DecoyCtx -> Rule -> IO ()
 removeRule dc rule = removeRules dc [rule]
 
 removeRules :: DecoyCtx -> [Rule] -> IO ()
-removeRules dc rules = modifyMVar_ (dcRouter dc) (pure . removeRouterRules rules)
+removeRules dc rules = modifyMVar_ (dcRouter dc) (pure . R.removeRouterRules rules)
 
 reset :: DecoyCtx -> IO ()
 reset dc =
-  putMVar (dcRouter dc) . mkRouter
+  putMVar (dcRouter dc) . R.mkRouter
     =<< loadRulesFile (dcRulesFile dc)
 
 loadRulesFile :: Maybe FilePath -> IO [Rule]
@@ -84,7 +83,7 @@ loadRulesFile (Just rulesFile) = do
          Right rules -> pure rules
      else fail $ "File does not exist: " <> rulesFile
 
-app :: MVar Router -> Maybe FilePath -> Wai.Application
+app :: MVar R.Router -> Maybe FilePath -> Wai.Application
 app routerMVar mRulesFile req respHandler = do
   let reqPath = Wai.pathInfo req
       queryMap = M.mapKeys TE.decodeUtf8Lenient
@@ -110,11 +109,11 @@ app routerMVar mRulesFile req respHandler = do
                   . Wai.responseLBS Http.badRequest400 []
                   $ "Invalid JSON: " <> BS8.pack err
         Right rules -> do
-          modifyMVar_ routerMVar (pure . addRouterRules rules)
+          modifyMVar_ routerMVar (pure . R.addRouterRules rules)
           respHandler $ Wai.responseLBS Http.ok200 [] "Rules added"
 
     ["_reset"] -> do
-      putMVar routerMVar . mkRouter =<< loadRulesFile mRulesFile
+      putMVar routerMVar . R.mkRouter =<< loadRulesFile mRulesFile
       respHandler $ Wai.responseLBS Http.ok200 [] "Rules reset"
 
     _ -> do
@@ -124,15 +123,15 @@ app routerMVar mRulesFile req respHandler = do
           Left err -> pure . Wai.responseLBS Http.badRequest400 []
                         $ "Invalid JSON: " <> BS8.pack err
           Right mReqJson ->
-            case matchEndpoint queryMap reqBodyBS mReqJson reqHeaders reqMethod router reqPath of
+            case R.matchEndpoint queryMap reqBodyBS mReqJson reqHeaders reqMethod router reqPath of
               Nothing -> pure $ Wai.responseLBS Http.notFound404 [] "No rule matched"
-              Just matched -> uncurry handleMatchedEndpoint matched
+              Just matched -> handleMatchedEndpoint matched
 
-handleMatchedEndpoint :: ResponseBody T.Text -> Maybe T.Text -> IO Wai.Response
-handleMatchedEndpoint rb mContentType =
-  case rb of
+handleMatchedEndpoint :: R.MatchedEndpoint -> IO Wai.Response
+handleMatchedEndpoint R.MkMatchedEndpoint{ R.responseBody, R.contentType, R.statusCode } =
+  case responseBody of
     Template resp -> pure $
-      Wai.responseLBS Http.ok200
+      Wai.responseLBS respCode
         respHeaders
         (LBS.fromStrict $ TE.encodeUtf8 resp)
     File file -> do
@@ -142,7 +141,14 @@ handleMatchedEndpoint rb mContentType =
            Wai.responseLBS Http.notFound404 [] $ "File not found: " <> BS8.pack file
          else do
            content <- LBS.readFile file
-           pure $ Wai.responseLBS Http.ok200 respHeaders content
+           pure $ Wai.responseLBS respCode respHeaders content
   where
     respHeaders =
-      [ (Http.hContentType, TE.encodeUtf8 ct) | Just ct <- [mContentType] ]
+      [ (Http.hContentType, TE.encodeUtf8 ct) | Just ct <- [contentType] ]
+    respCode = case statusCode of
+      Nothing -> Http.ok200
+      Just sc ->
+        case M.lookup (fromIntegral sc) allCodes of
+          Nothing -> Http.mkStatus (fromIntegral sc) mempty
+          Just c -> c
+    allCodes = M.fromList $ (\x -> (Http.statusCode x, x)) <$> [minBound .. maxBound]
