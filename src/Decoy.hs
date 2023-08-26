@@ -33,6 +33,9 @@ import qualified System.Directory as Dir
 import qualified Decoy.Router as R
 import           Decoy.Rule as Rule
 
+-- | Holds the state related to a decoy server instance.
+--
+-- @since 0.1.0.0
 data DecoyCtx = DC
   { dcRouter :: MVar R.Router
   , dcAsync :: Async ()
@@ -42,6 +45,17 @@ data DecoyCtx = DC
 
 type FileCache = M.Map FilePath LBS.ByteString
 
+-- | Run a decoy server in a child thread given a port and optional rules file.
+--
+-- __Example:__
+--
+-- @
+-- withDecoyServer 8080 Nothing $ \dc -> do
+--    addRules dc someRules
+--    _ <- httpBS "GET http://localhost:8080/some/path"
+-- @
+--
+-- @since 0.1.0.0
 withDecoyServer :: Warp.Port -> Maybe FilePath -> (DecoyCtx -> IO a) -> IO a
 withDecoyServer port mRulesFile cont = do
   rules <- loadRulesFile mRulesFile
@@ -55,22 +69,34 @@ withDecoyServer port mRulesFile cont = do
       , dcFileCache = initFileCache
       }
 
+-- | Run a decoy server synchronously given a port and optional rules file.
+--
+-- @since 0.1.0.0
 runDecoyServer :: Warp.Port -> Maybe FilePath -> IO ()
 runDecoyServer port mRulesFile =
   withDecoyServer port mRulesFile $ Async.wait . dcAsync
 
+-- | Add a new rule to running decoy server.
+--
+-- @since 0.1.0.0
 addRule :: DecoyCtx -> Rule -> IO ()
 addRule dc rule = addRules dc [rule]
 
 addRules :: DecoyCtx -> [Rule] -> IO ()
 addRules dc rules = modifyMVar_ (dcRouter dc) (pure . R.addRouterRules rules)
 
+-- | Remove a rule from a decoy server.
+--
+-- @since 0.1.0.0
 removeRule :: DecoyCtx -> Rule -> IO ()
 removeRule dc rule = removeRules dc [rule]
 
 removeRules :: DecoyCtx -> [Rule] -> IO ()
 removeRules dc rules = modifyMVar_ (dcRouter dc) (pure . R.removeRouterRules rules)
 
+-- | Resets a running server to its initial state.
+--
+-- @since 0.1.0.0
 reset :: DecoyCtx -> IO ()
 reset dc =
   putMVar (dcRouter dc) . R.mkRouter

@@ -1,7 +1,8 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Decoy.Rule
-  ( RuleF(..)
+  ( -- * Types
+    RuleF(..)
   , Rule
   , RuleSpec
   , Response(..)
@@ -46,7 +47,7 @@ type Rule = RuleF [PathPart] [JP.JSONPathElement] Stache.Template
 -- @since 0.1.0.0
 type RuleSpec = RuleF T.Text T.Text T.Text
 
--- | Base type for a rule, which can either 'Rule' or 'RuleSpec'.
+-- | Base type for a rule, which can either be a 'Rule' or 'RuleSpec'.
 --
 -- @since 0.1.0.0
 data RuleF urlPath jsonPath template = MkRule
@@ -211,18 +212,63 @@ setReqMethod m r = r { request = (request r) { reqMethod = Just m } }
 setReqContentType :: T.Text -> RuleF a b c -> RuleF a b c
 setReqContentType c r = r { request = (request r) { reqContentType = Just c } }
 
+-- | Add a body rule which must match against the request body for the endpoint
+-- rule to match.
+--
+-- __Examples:__
+--
+-- @
+-- addBodyRule 'MkBodyRule' { jsonPathOpts = Nothing, regex = "^a regex.*" } someRule
+-- @
+--
+-- @
+-- addBodyRule 'MkBodyRule'
+--   { jsonPathOpts = MkJsonPathOpts
+--     { jsonPath = "$.path.to.field"
+--     , allMatch = True
+--     }
+--   , regex = "^a regex.*"
+--   } someRule
+-- @
+--
+-- @since 0.1.0.0
 addBodyRule :: BodyRule T.Text -> RuleSpec -> RuleSpec
 addBodyRule b r = r { request = (request r) { reqBodyRules = b : reqBodyRules (request r) } }
 
+-- | Replace all request body rules in an endpoint rule.
+--
+-- @since 0.1.0.0
 setBodyRules :: [BodyRule T.Text] -> RuleSpec -> RuleSpec
 setBodyRules b r = r { request = (request r) { reqBodyRules = b } }
 
+-- | Replace the response body of a rule.
+--
+-- @since 0.1.0.0
 setBody :: ResponseBody T.Text -> RuleSpec -> RuleSpec
 setBody b r = r { response = (response r) { respBody = b } }
 
+-- | Set a content type that must be contained in the @Accept@ header
+-- of a request for the rule to match.
+--
+-- __Example:__
+--
+-- @
+-- setRespContentType "text/plain" $ mkRuleSpec "some/path" (Template "body")
+-- @
+--
+-- @since 0.1.0.0
 setRespContentType :: T.Text -> RuleF a b c -> RuleF a b c
 setRespContentType c r = r { response = (response r) { respContentType = Just c } }
 
+-- | Set the status code of the response returned if the given rule matches.
+--
+-- __Example:__
+--
+-- @
+-- setStatusCode 500 $ mkRuleSpec "some/path" (Template "body")
+-- @
+--
+-- @since 0.1.0.0
 setStatusCode :: Word -> RuleF a b c -> RuleF a b c
 setStatusCode c r = r { response = (response r) { respStatusCode = Just c } }
 
