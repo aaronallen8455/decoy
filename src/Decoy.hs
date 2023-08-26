@@ -37,17 +37,22 @@ data DecoyCtx = DC
   { dcRouter :: MVar R.Router
   , dcAsync :: Async ()
   , dcRulesFile :: Maybe FilePath
+  , dcFileCache :: MVar FileCache
   }
+
+type FileCache = M.Map FilePath LBS.ByteString
 
 withDecoyServer :: Warp.Port -> Maybe FilePath -> (DecoyCtx -> IO a) -> IO a
 withDecoyServer port mRulesFile cont = do
   rules <- loadRulesFile mRulesFile
   initRouterMVar <- newMVar $ R.mkRouter rules
-  Async.withAsync (Warp.run port $ app initRouterMVar mRulesFile) $ \async ->
+  initFileCache <- newMVar mempty
+  Async.withAsync (Warp.run port $ app initRouterMVar initFileCache mRulesFile) $ \async ->
     cont DC
       { dcRouter = initRouterMVar
       , dcAsync = async
       , dcRulesFile = mRulesFile
+      , dcFileCache = initFileCache
       }
 
 runDecoyServer :: Warp.Port -> Maybe FilePath -> IO ()
@@ -83,8 +88,8 @@ loadRulesFile (Just rulesFile) = do
          Right rules -> pure rules
      else fail $ "File does not exist: " <> rulesFile
 
-app :: MVar R.Router -> Maybe FilePath -> Wai.Application
-app routerMVar mRulesFile req respHandler = do
+app :: MVar R.Router -> MVar FileCache -> Maybe FilePath -> Wai.Application
+app routerMVar fileCacheMVar mRulesFile req respHandler = do
   let reqPath = Wai.pathInfo req
       queryMap = M.mapKeys TE.decodeUtf8Lenient
                . fmap (fmap TE.decodeUtf8Lenient)
@@ -125,23 +130,29 @@ app routerMVar mRulesFile req respHandler = do
           Right mReqJson ->
             case R.matchEndpoint queryMap reqBodyBS mReqJson reqHeaders reqMethod router reqPath of
               Nothing -> pure $ Wai.responseLBS Http.notFound404 [] "No rule matched"
-              Just matched -> handleMatchedEndpoint matched
+              Just matched -> handleMatchedEndpoint fileCacheMVar matched
 
-handleMatchedEndpoint :: R.MatchedEndpoint -> IO Wai.Response
-handleMatchedEndpoint R.MkMatchedEndpoint{ R.responseBody, R.contentType, R.statusCode } =
+handleMatchedEndpoint :: MVar FileCache -> R.MatchedEndpoint -> IO Wai.Response
+handleMatchedEndpoint fileCacheMVar
+          R.MkMatchedEndpoint{ R.responseBody, R.contentType, R.statusCode } =
   case responseBody of
     Template resp -> pure $
       Wai.responseLBS respCode
         respHeaders
         (LBS.fromStrict $ TE.encodeUtf8 resp)
     File file -> do
-      exists <- Dir.doesFileExist file
-      if not exists
-         then pure $
-           Wai.responseLBS Http.notFound404 [] $ "File not found: " <> BS8.pack file
-         else do
-           content <- LBS.readFile file
-           pure $ Wai.responseLBS respCode respHeaders content
+      fileCache <- readMVar fileCacheMVar
+      case M.lookup file fileCache of
+        Nothing -> do
+          exists <- Dir.doesFileExist file
+          if not exists
+             then pure $
+               Wai.responseLBS Http.notFound404 [] $ "File not found: " <> BS8.pack file
+             else do
+               content <- LBS.readFile file
+               modifyMVar_ fileCacheMVar $ pure . M.insert file content
+               pure $ Wai.responseLBS respCode respHeaders content
+        Just cached -> pure $ Wai.responseLBS respCode respHeaders cached
   where
     respHeaders =
       [ (Http.hContentType, TE.encodeUtf8 ct) | Just ct <- [contentType] ]

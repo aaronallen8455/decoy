@@ -35,13 +35,28 @@ import qualified Data.Text as T
 import qualified Text.Megaparsec as P
 import qualified Text.Mustache as Stache
 
+-- | A rule that has been fully instantiated and can be added to a server instance.
+--
+-- @since 0.1.0.0
 type Rule = RuleF [PathPart] [JP.JSONPathElement] Stache.Template
 
+-- | A specification for a rule. Construct this using 'mkRuleSpec' and convert
+-- to a 'Rule' using 'compileRule'.
+--
+-- @since 0.1.0.0
+type RuleSpec = RuleF T.Text T.Text T.Text
+
+-- | Base type for a rule, which can either 'Rule' or 'RuleSpec'.
+--
+-- @since 0.1.0.0
 data RuleF urlPath jsonPath template = MkRule
   { request :: Request urlPath jsonPath
   , response :: Response template
   } deriving (Show, Eq, Functor)
 
+-- | Request portion of a rule.
+--
+-- @since 0.1.0.0
 data Request urlPath jsonPath = MkRequest
   { reqPath :: urlPath
   , reqQuery :: QueryRules
@@ -50,6 +65,15 @@ data Request urlPath jsonPath = MkRequest
   , reqBodyRules :: [BodyRule jsonPath]
   } deriving (Show, Eq, Functor, Foldable, Traversable)
 
+-- | Specifies which query arguments must be present for a rule to match and
+-- optionally whether a specific value must be mapped to that argument.
+--
+-- @since 0.1.0.0
+type QueryRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value
+
+-- | The options used to match against paths in a JSON request body.
+--
+-- @since 0.1.0.0
 data JsonPathOpts jsonPath = MkJsonPathOpts
   { jsonPath :: jsonPath
     -- ^ a JSON path which must match at least one element of the request body.
@@ -58,6 +82,9 @@ data JsonPathOpts jsonPath = MkJsonPathOpts
     -- If False, at least one element must satisfy the rule.
   } deriving (Show, Eq, Functor, Foldable, Traversable)
 
+-- | Allows a rule to match against the contents of the request body.
+--
+-- @since 0.1.0.0
 data BodyRule jsonPath = MkBodyRule
   { jsonPathOpts :: Maybe (JsonPathOpts jsonPath)
     -- ^ For JSON request bodies, specify a JSON path to where the regex should
@@ -66,15 +93,23 @@ data BodyRule jsonPath = MkBodyRule
     -- ^ A regular expression that must be matched against
   } deriving (Show, Eq, Functor, Foldable, Traversable)
 
+-- | The response portion of a rule.
+--
+-- @since 0.1.0.0
 data Response template = MkResponse
   { respBody :: ResponseBody template
   , respContentType :: Maybe T.Text
+    -- ^ If specified, the request's @Accept@ header must contain this value.
   , respStatusCode :: Maybe Word
+    -- ^ Specifies a status code for the response. @200@ is used if @Nothing@.
   } deriving (Show, Eq, Functor, Foldable, Traversable)
 
+-- | The response body that will be returned if a rule matches.
+--
+-- @since 0.1.0.0
 data ResponseBody t
-  = File FilePath
-  | Template t -- Stach.Template
+  = File FilePath -- ^ A static file
+  | Template t -- ^ A mustache template
   deriving (Show, Eq, Functor, Foldable, Traversable)
 
 data PathPart
@@ -90,15 +125,17 @@ pathFromText txt = parsePart <$> T.split (== '/') txt
         Nothing -> Static p
         Just r -> PathParam r
 
--- pathToText :: [PathPart] -> T.Text
--- pathToText = T.intercalate "/" . map partToText
---   where
---     partToText = \case
---       Static t -> t
---       PathParam t -> ":" <> t
-
-type RuleSpec = RuleF T.Text T.Text T.Text
-
+-- | A helper for instantiating a 'RuleSpec' given a URL path and a
+-- 'ResponseBody'.
+--
+-- __Examples:__
+--
+-- @
+-- mkRuleSpec "users/:userId/delete" (Template "User {{path.userId}} deleted")
+-- mkRuleSpec "items" (File "./items.json")
+-- @
+--
+-- @since 0.1.0.0
 mkRuleSpec :: T.Text -> ResponseBody T.Text -> RuleSpec
 mkRuleSpec urlPath body =
   MkRule
@@ -116,18 +153,61 @@ mkRuleSpec urlPath body =
         }
     }
 
+-- | Set the URL path of a 'RuleSpec'.
+--
+-- @since 0.1.0.0
 setUrlPath :: T.Text -> RuleSpec -> RuleSpec
 setUrlPath p r = r { request = (request r) { reqPath = p } }
 
-addQueryRule :: T.Text -> Maybe T.Text -> RuleF a b c -> RuleF a b c
+-- | Add a rule for query string arguments.
+--
+-- __Examples:__
+--
+-- @
+-- addQueryRule "key" Nothing $ mkRuleSpec "some/path" (Template "body")
+-- @
+-- creates a rule that matches a request to @some/path?key@
+-- @
+-- addQueryRule "key" (Just "val") $ mkRuleSpec "some/path" (Template "body")
+-- @
+-- creates a rule that matches a request to @some/path?key=val@
+--
+-- @since 0.1.0.0
+addQueryRule
+  :: T.Text -- ^ The query argument key
+  -> Maybe T.Text -- ^ A value that must be assigned to the query argument
+  -> RuleF a b c
+  -> RuleF a b c
 addQueryRule k v r = r { request = (request r) { reqQuery = M.insert k v $ reqQuery (request r) } }
 
+-- | Replace all query rules within a rule.
+--
+-- @since 0.1.0.0
 setQueryRules :: QueryRules -> RuleF a b c -> RuleF a b c
 setQueryRules q r = r { request = (request r) { reqQuery = q } }
 
+-- | Specifies the request method that must be used for a rule to match.
+--
+-- __Example:__
+--
+-- @
+-- setReqMethod "POST" $ mkRuleSpec "some/path" (Template "body")
+-- @
+--
+-- @since 0.1.0.0
 setReqMethod :: T.Text -> RuleF a b c -> RuleF a b c
 setReqMethod m r = r { request = (request r) { reqMethod = Just m } }
 
+-- | Set a content type that must be contained in the @Content-Type@ header
+-- of a request for the rule to match.
+--
+-- __Example:__
+--
+-- @
+-- setReqContentType "json" $ mkRuleSpec "some/path" (Template "body")
+-- @
+--
+-- @since 0.1.0.0
 setReqContentType :: T.Text -> RuleF a b c -> RuleF a b c
 setReqContentType c r = r { request = (request r) { reqContentType = Just c } }
 
@@ -146,6 +226,10 @@ setRespContentType c r = r { response = (response r) { respContentType = Just c 
 setStatusCode :: Word -> RuleF a b c -> RuleF a b c
 setStatusCode c r = r { response = (response r) { respStatusCode = Just c } }
 
+-- | Attempts to convert a 'RuleSpec' to a 'Rule'. It will return a @Left@ if
+-- the rule is invalid in some way.
+--
+-- @since 0.1.0.0
 compileRule :: RuleSpec -> Either String Rule
 compileRule rs = do
   body <- traverse (first show . Stache.compileTemplate "") $ response rs
@@ -235,5 +319,3 @@ instance ToJSON (JsonPathOpts T.Text) where
     [ "jsonPath" .= jsonPath o
     , "allMatch" .= allMatch o
     ]
-
-type QueryRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value
