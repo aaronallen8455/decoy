@@ -1,4 +1,4 @@
 Cache response files
-Simpler API for instantiating rules
 Write docs
-Tests for path and query vars
+Better rule matching
+Backtracking in routing

@@ -25,6 +25,9 @@ tests dc = testGroup "Tests"
   , testCase "Request content type" reqCT
   , testCase "Response content type" respCT
   , testCase "Status code" respStatus
+  , testCase "Path param" pathParam
+  , testCase "Query string match" queryStringMatch
+  , testCase "Query string arg" queryStringArg
   ]
 
 addRulesByRequest :: Assertion
@@ -109,3 +112,27 @@ respStatus = do
   _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
   resp <- httpBS "GET http://localhost:9000/statusc"
   getResponseStatusCode resp @?= 500
+
+pathParam :: Assertion
+pathParam = do
+  let rule = mkRuleSpec "param/path/:param" $ Template "param: {{path.param}}"
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
+  resp <- httpBS "GET http://localhost:9000/param/path/yo"
+  getResponseBody resp @?= "param: yo"
+
+queryStringMatch :: Assertion
+queryStringMatch = do
+  let rules =
+        [ addQueryRule "query" (Just "one") . mkRuleSpec "query/string" $ Template "one"
+        , addQueryRule "query" (Just "two") . mkRuleSpec "query/string" $ Template "two"
+        ]
+  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
+  resp <- httpBS "GET http://localhost:9000/query/string?query=two"
+  getResponseBody resp @?= "two"
+
+queryStringArg :: Assertion
+queryStringArg = do
+  let rule = mkRuleSpec "query/string/arg" $ Template "query: {{query.arg}}"
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
+  resp <- httpBS "GET http://localhost:9000/query/string/arg?arg=sup"
+  getResponseBody resp @?= "query: sup"
