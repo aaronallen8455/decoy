@@ -9,9 +9,22 @@ module Decoy.Rule
   , Request(..)
   , JsonPathOpts(..)
   , BodyRule(..)
-  , compileRule
   , QueryRules
   , PathPart(..)
+  -- * Instantiating rules
+  , mkRuleSpec
+  , compileRule
+  -- * Rule modifiers
+  , setUrlPath
+  , addQueryRule
+  , setQueryRules
+  , setReqMethod
+  , setReqContentType
+  , addBodyRule
+  , setBodyRules
+  , setBody
+  , setRespContentType
+  , setStatusCode
   ) where
 
 import           Data.Aeson
@@ -27,7 +40,7 @@ type Rule = RuleF [PathPart] [JP.JSONPathElement] Stache.Template
 data RuleF urlPath jsonPath template = MkRule
   { request :: Request urlPath jsonPath
   , response :: Response template
-  } deriving (Eq, Functor)
+  } deriving (Show, Eq, Functor)
 
 data Request urlPath jsonPath = MkRequest
   { reqPath :: urlPath
@@ -35,7 +48,7 @@ data Request urlPath jsonPath = MkRequest
   , reqMethod :: Maybe T.Text
   , reqContentType :: Maybe T.Text
   , reqBodyRules :: [BodyRule jsonPath]
-  } deriving (Eq, Functor, Foldable, Traversable)
+  } deriving (Show, Eq, Functor, Foldable, Traversable)
 
 data JsonPathOpts jsonPath = MkJsonPathOpts
   { jsonPath :: jsonPath
@@ -43,7 +56,7 @@ data JsonPathOpts jsonPath = MkJsonPathOpts
   , allMatch :: Bool
     -- ^ If True, all elements matched by the given JSON path must satisfy the rule.
     -- If False, at least one element must satisfy the rule.
-  } deriving (Eq, Functor, Foldable, Traversable)
+  } deriving (Show, Eq, Functor, Foldable, Traversable)
 
 data BodyRule jsonPath = MkBodyRule
   { jsonPathOpts :: Maybe (JsonPathOpts jsonPath)
@@ -51,23 +64,23 @@ data BodyRule jsonPath = MkBodyRule
     -- be matched
   , regex :: T.Text
     -- ^ A regular expression that must be matched against
-  } deriving (Eq, Functor, Foldable, Traversable)
+  } deriving (Show, Eq, Functor, Foldable, Traversable)
 
 data Response template = MkResponse
   { respBody :: ResponseBody template
   , respContentType :: Maybe T.Text
   , respStatusCode :: Maybe Word
-  } deriving (Eq, Functor, Foldable, Traversable)
+  } deriving (Show, Eq, Functor, Foldable, Traversable)
 
 data ResponseBody t
   = File FilePath
   | Template t -- Stach.Template
-  deriving (Eq, Functor, Foldable, Traversable)
+  deriving (Show, Eq, Functor, Foldable, Traversable)
 
 data PathPart
   = Static T.Text
   | PathParam T.Text
-  deriving Eq
+  deriving (Show, Eq)
 
 pathFromText :: T.Text -> [PathPart]
 pathFromText txt = parsePart <$> T.split (== '/') txt
@@ -85,6 +98,53 @@ pathFromText txt = parsePart <$> T.split (== '/') txt
 --       PathParam t -> ":" <> t
 
 type RuleSpec = RuleF T.Text T.Text T.Text
+
+mkRuleSpec :: T.Text -> ResponseBody T.Text -> RuleSpec
+mkRuleSpec urlPath body =
+  MkRule
+    { request = MkRequest
+        { reqPath = urlPath
+        , reqQuery = mempty
+        , reqMethod = Nothing
+        , reqContentType = Nothing
+        , reqBodyRules = []
+        }
+    , response = MkResponse
+        { respBody = body
+        , respContentType = Nothing
+        , respStatusCode = Nothing
+        }
+    }
+
+setUrlPath :: T.Text -> RuleSpec -> RuleSpec
+setUrlPath p r = r { request = (request r) { reqPath = p } }
+
+addQueryRule :: T.Text -> Maybe T.Text -> RuleF a b c -> RuleF a b c
+addQueryRule k v r = r { request = (request r) { reqQuery = M.insert k v $ reqQuery (request r) } }
+
+setQueryRules :: QueryRules -> RuleF a b c -> RuleF a b c
+setQueryRules q r = r { request = (request r) { reqQuery = q } }
+
+setReqMethod :: T.Text -> RuleF a b c -> RuleF a b c
+setReqMethod m r = r { request = (request r) { reqMethod = Just m } }
+
+setReqContentType :: T.Text -> RuleF a b c -> RuleF a b c
+setReqContentType c r = r { request = (request r) { reqContentType = Just c } }
+
+addBodyRule :: BodyRule T.Text -> RuleSpec -> RuleSpec
+addBodyRule b r = r { request = (request r) { reqBodyRules = b : reqBodyRules (request r) } }
+
+setBodyRules :: [BodyRule T.Text] -> RuleSpec -> RuleSpec
+setBodyRules b r = r { request = (request r) { reqBodyRules = b } }
+
+setBody :: ResponseBody T.Text -> RuleSpec -> RuleSpec
+setBody b r = r { response = (response r) { respBody = b } }
+
+setRespContentType :: T.Text -> RuleF a b c -> RuleF a b c
+setRespContentType c r = r { response = (response r) { respContentType = Just c } }
+
+setStatusCode :: Word -> RuleF a b c -> RuleF a b c
+setStatusCode c r = r { response = (response r) { respStatusCode = Just c } }
 
 compileRule :: RuleSpec -> Either String Rule
 compileRule rs = do
