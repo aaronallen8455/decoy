@@ -179,6 +179,7 @@ handleMatchedEndpoint fileCacheMVar
                modifyMVar_ fileCacheMVar $ pure . M.insert file content
                pure $ Wai.responseLBS respCode respHeaders content
         Just cached -> pure $ Wai.responseLBS respCode respHeaders cached
+    NoBody -> pure $ Wai.responseLBS respCode respHeaders ""
   where
     respHeaders =
       [ (Http.hContentType, TE.encodeUtf8 ct) | Just ct <- [contentType] ]

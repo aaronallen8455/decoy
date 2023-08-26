@@ -111,6 +111,7 @@ data Response template = MkResponse
 data ResponseBody t
   = File FilePath -- ^ A static file
   | Template t -- ^ A mustache template
+  | NoBody
   deriving (Show, Eq, Functor, Foldable, Traversable)
 
 data PathPart
@@ -299,8 +300,9 @@ instance FromJSON (Response T.Text) where
     val <- o .: "body"
     MkResponse
       <$> ( case ty :: String of
-              "file" -> pure $ File val
-              "template" -> pure . Template $ T.pack val
+              "file" -> maybe (fail "no body") (pure . File) val
+              "template" -> maybe (fail "no body") (pure . Template . T.pack) val
+              "no_body" -> pure NoBody
               _ -> fail $ "invalid response body type: " <> ty
           )
       <*> o .:? "contentType"
@@ -337,10 +339,14 @@ instance ToJSON (Response T.Text) where
   toJSON r = object
     [ "type" .= (case respBody r of
                   Template{} -> ("template" :: T.Text)
-                  File{} -> "file")
+                  File{} -> "file"
+                  NoBody -> "no_body"
+                )
     , "body" .= (case respBody r of
-                  Template t -> t
-                  File f -> T.pack f)
+                  Template t -> Just t
+                  File f -> Just $ T.pack f
+                  NoBody -> Nothing
+                )
     , "contentType" .= respContentType r
     , "statusCode" .= respStatusCode r
     ]
