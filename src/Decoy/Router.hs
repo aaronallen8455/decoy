@@ -10,6 +10,8 @@ module Decoy.Router
   , removeRouterRule
   , matchEndpoint
   , MatchedEndpoint(..)
+  , QueryParams
+  , renderTemplate
   ) where
 
 import           Control.Applicative ((<|>), empty)
@@ -84,6 +86,7 @@ data MatchedEndpoint = MkMatchedEndpoint
   { responseBody :: ResponseBody T.Text
   , contentType :: Maybe T.Text
   , statusCode :: Maybe Word
+  , pathParams :: M.Map T.Text T.Text
   }
 
 matchEndpoint
@@ -128,6 +131,7 @@ matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
                    <$> respBody resp
       , contentType = respContentType resp
       , statusCode = respStatusCode resp
+      , pathParams
       }
 
 matchBody :: [BodyRule [JP.JSONPathElement]] -> LBS.ByteString -> Maybe Aeson.Value -> Bool

@@ -25,10 +25,12 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as BS8
 import qualified Data.Map.Strict as M
 import qualified Data.Text.Encoding as TE
+import qualified Data.Text.IO as T
 import qualified Network.HTTP.Types as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified System.Directory as Dir
+import qualified Text.Mustache as Stache
 
 import qualified Decoy.Router as R
 import           Decoy.Rule as Rule
@@ -43,7 +45,7 @@ data DecoyCtx = DC
   , dcFileCache :: MVar FileCache
   }
 
-type FileCache = M.Map FilePath LBS.ByteString
+type FileCache = M.Map FilePath Stache.Template
 
 -- | Run a decoy server in a child thread given a port and optional rules file.
 --
@@ -156,11 +158,17 @@ app routerMVar fileCacheMVar mRulesFile req respHandler = do
           Right mReqJson ->
             case R.matchEndpoint queryMap reqBodyBS mReqJson reqHeaders reqMethod router reqPath of
               Nothing -> pure $ Wai.responseLBS Http.notFound404 [] "No rule matched"
-              Just matched -> handleMatchedEndpoint fileCacheMVar matched
+              Just matched ->
+                handleMatchedEndpoint queryMap mReqJson fileCacheMVar matched
 
-handleMatchedEndpoint :: MVar FileCache -> R.MatchedEndpoint -> IO Wai.Response
-handleMatchedEndpoint fileCacheMVar
-          R.MkMatchedEndpoint{ R.responseBody, R.contentType, R.statusCode } =
+handleMatchedEndpoint
+  :: R.QueryParams
+  -> Maybe Aeson.Value
+  -> MVar FileCache
+  -> R.MatchedEndpoint
+  -> IO Wai.Response
+handleMatchedEndpoint queryParams mReqJson fileCacheMVar
+          R.MkMatchedEndpoint{ R.responseBody, R.contentType, R.statusCode, R.pathParams } =
   case responseBody of
     Template resp -> pure $
       Wai.responseLBS respCode
@@ -168,17 +176,29 @@ handleMatchedEndpoint fileCacheMVar
         (LBS.fromStrict $ TE.encodeUtf8 resp)
     File file -> do
       fileCache <- readMVar fileCacheMVar
-      case M.lookup file fileCache of
+      eContent <- case M.lookup file fileCache of
         Nothing -> do
           exists <- Dir.doesFileExist file
           if not exists
-             then pure $
-               Wai.responseLBS Http.notFound404 [] $ "File not found: " <> BS8.pack file
-             else do
-               content <- LBS.readFile file
-               modifyMVar_ fileCacheMVar $ pure . M.insert file content
-               pure $ Wai.responseLBS respCode respHeaders content
-        Just cached -> pure $ Wai.responseLBS respCode respHeaders cached
+          then pure .
+            Left . Wai.responseLBS Http.notFound404 []
+              $ "File not found: " <> BS8.pack file
+          else do
+            eContent <- Stache.compileTemplate "" <$> T.readFile file
+            case eContent of
+              Left err ->
+                pure . Left . Wai.responseLBS Http.status500 []
+                  $ "Invalid mustache template: " <> BS8.pack (show err)
+              Right content -> do
+                modifyMVar_ fileCacheMVar $ pure . M.insert file content
+                pure $ Right content
+        Just cached -> pure $ Right cached
+      case eContent of
+        Left errResp -> pure errResp
+        Right content -> do
+          let rendered = LBS.fromStrict . TE.encodeUtf8
+                       $ R.renderTemplate pathParams queryParams mReqJson content
+          pure $ Wai.responseLBS respCode respHeaders rendered
     NoBody -> pure $ Wai.responseLBS respCode respHeaders ""
   where
     respHeaders =
