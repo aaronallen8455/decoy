@@ -106,7 +106,7 @@ matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
   go params router [] = asum $ do
     ep <- endpoints router
 
-    guard $ matchQuery (reqQuery . request $ epRule ep) queryParams
+    guard $ matchQuery (reqQueryRules . request $ epRule ep) queryParams
 
     let resp = response $ epRule ep
     for_ (reqContentType . request $ epRule ep) $ \ct ->

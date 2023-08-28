@@ -1,0 +1,107 @@
+{
+  "title": "RuleSpec",
+  "type": "object",
+  "description": "Specification of a decoy server rule",
+  "required": ["request", "response"],
+  "properties": {
+    "request": { "$ref": "#/$defs/request" },
+    "response": { "$ref": "#/$defs/response" }
+  },
+  "$defs": {
+    "request": {
+      "title": "Request",
+      "type": "object",
+      "description": "Specifies the request portion of a rule",
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The URL path that must be matched. Path params are prefixed with a colon."
+        },
+        "queryRules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["queryParam"],
+            "properties": {
+              "queryParam": {
+                "type": "string",
+                "description": "The required query param."
+              },
+              "expectedValue": {
+                "type": ["string", "null"],
+                "description": "If specified, the value that must be assigned to the param."
+              }
+            }
+          },
+          "description": "Conditions pertaining to the requested URL's query string"
+        },
+        "method": {
+          "type": ["string", "null"],
+          "description": "The expected request method, such as 'POST', 'GET', etc"
+        },
+        "contentType": {
+          "type": ["string", "null"],
+          "description": "If specified, the request's 'Content-Type' header must contain this value"
+        },
+        "bodyRules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bodyRule" },
+          "description": ""
+        }
+      }
+    },
+    "response": {
+      "title": "Response",
+      "type": "object",
+      "description": "Specifies the response portion of a rule",
+      "required": ["type", "body"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "The type of response body",
+          "enum": ["file", "template", "no_body"]
+        },
+        "body": {
+          "type": "string",
+          "description": "The value that goes along with the body type. 'template' is a mustache template string and 'file' is a path to a file containing a mustache template."
+        },
+        "contentType": {
+          "type": ["string", "null"],
+          "description": "If specified, the request's 'Accept' header must contain this value."
+        },
+        "statusCode": {
+          "type": ["integer", "null"],
+          "description": "The status code that should be returned. If not specified, 200 is used."
+        }
+      }
+    },
+    "bodyRule": {
+      "title": "BodyRule",
+      "type": "object",
+      "description": "",
+      "required": ["regex"],
+      "properties": {
+        "jsonPathOpts": {
+          "type": "object",
+          "description": "Allows for specifying a JSON path at which the regex should match.",
+          "required": ["jsonPath", "allMatch"],
+          "properties": {
+            "jsonPath": {
+              "type": "string",
+              "description": "A JSON path into the request body"
+            },
+            "allMatch": {
+              "type": "boolean",
+              "description": "If true, when the JSON path focuses multiple values, all of them must satisfy the regex. If false, at least one must."
+            }
+          }
+        },
+        "regex": {
+          "type": "string",
+          "description": "A regex pattern that must be satisfied by some aspect of the request body"
+        }
+      }
+    }
+  }
+}

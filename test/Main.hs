@@ -123,8 +123,8 @@ pathParam = do
 queryStringMatch :: Assertion
 queryStringMatch = do
   let rules =
-        [ addQueryRule "query" (Just "one") . mkRuleSpec "query/string" $ Template "one"
-        , addQueryRule "query" (Just "two") . mkRuleSpec "query/string" $ Template "two"
+        [ addQueryRule (MkQueryRule "query" (Just "one")) . mkRuleSpec "query/string" $ Template "one"
+        , addQueryRule (MkQueryRule "query" (Just "two")) . mkRuleSpec "query/string" $ Template "two"
         ]
   _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
   resp <- httpBS "GET http://localhost:9000/query/string?query=two"

@@ -8,7 +8,7 @@ import           Decoy (runDecoyServer)
 
 main :: IO ()
 main = do
-  mPort <- (readMaybe =<<) <$> Env.lookupEnv "PORT"
-  mRulesFile <- Env.lookupEnv "RULES_FILE"
+  mPort <- (readMaybe =<<) <$> Env.lookupEnv "DECOY_PORT"
+  mRulesFile <- Env.lookupEnv "DECOY_RULES_FILE"
   runDecoyServer (fromMaybe 9000 mPort)
                  mRulesFile
