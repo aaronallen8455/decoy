@@ -133,7 +133,18 @@ app routerMVar fileCacheMVar mRulesFile req respHandler = do
           _ -> Right Nothing
 
   case reqPath of
-    ["_rules"] ->
+    ["_add-rule"] ->
+      case compileRule
+             =<< Aeson.parseEither Aeson.parseJSON
+             =<< maybe (Left "No body") Right
+             =<< eReqBodyJson of
+        Left err -> respHandler
+                  . Wai.responseLBS Http.badRequest400 []
+                  $ "Invalid JSON: " <> BS8.pack err
+        Right rule -> do
+          modifyMVar_ routerMVar (pure . R.addRouterRule rule)
+          respHandler $ Wai.responseLBS Http.ok200 [] "Rules added"
+    ["_add-rules"] ->
       case traverse compileRule
              =<< Aeson.parseEither Aeson.parseJSON
              =<< maybe (Left "No body") Right
@@ -145,7 +156,7 @@ app routerMVar fileCacheMVar mRulesFile req respHandler = do
           modifyMVar_ routerMVar (pure . R.addRouterRules rules)
           respHandler $ Wai.responseLBS Http.ok200 [] "Rules added"
 
-    ["_reset"] -> do
+    ["_reset-rules"] -> do
       putMVar routerMVar . R.mkRouter =<< loadRulesFile mRulesFile
       respHandler $ Wai.responseLBS Http.ok200 [] "Rules reset"
 
@@ -175,24 +186,7 @@ handleMatchedEndpoint queryParams mReqJson fileCacheMVar
         respHeaders
         (LBS.fromStrict $ TE.encodeUtf8 resp)
     File file -> do
-      fileCache <- readMVar fileCacheMVar
-      eContent <- case M.lookup file fileCache of
-        Nothing -> do
-          exists <- Dir.doesFileExist file
-          if not exists
-          then pure .
-            Left . Wai.responseLBS Http.notFound404 []
-              $ "File not found: " <> BS8.pack file
-          else do
-            eContent <- Stache.compileTemplate "" <$> T.readFile file
-            case eContent of
-              Left err ->
-                pure . Left . Wai.responseLBS Http.status500 []
-                  $ "Invalid mustache template: " <> BS8.pack (show err)
-              Right content -> do
-                modifyMVar_ fileCacheMVar $ pure . M.insert file content
-                pure $ Right content
-        Just cached -> pure $ Right cached
+      eContent <- getFileCache fileCacheMVar file
       case eContent of
         Left errResp -> pure errResp
         Right content -> do
@@ -210,3 +204,28 @@ handleMatchedEndpoint queryParams mReqJson fileCacheMVar
           Nothing -> Http.mkStatus (fromIntegral sc) mempty
           Just c -> c
     allCodes = M.fromList $ (\x -> (Http.statusCode x, x)) <$> [minBound .. maxBound]
+
+-- | Get template file contents from cache or read from disk and add to cache
+getFileCache
+  :: MVar FileCache
+  -> FilePath
+  -> IO (Either Wai.Response Stache.Template)
+getFileCache fileCacheMVar file = do
+  fileCache <- readMVar fileCacheMVar
+  case M.lookup file fileCache of
+    Nothing -> do
+      exists <- Dir.doesFileExist file
+      if not exists
+      then pure .
+        Left . Wai.responseLBS Http.notFound404 []
+          $ "File not found: " <> BS8.pack file
+      else do
+        eContent <- Stache.compileTemplate "" <$> T.readFile file
+        case eContent of
+          Left err ->
+            pure . Left . Wai.responseLBS Http.status500 []
+              $ "Invalid mustache template: " <> BS8.pack (show err)
+          Right content -> do
+            modifyMVar_ fileCacheMVar $ pure . M.insert file content
+            pure $ Right content
+    Just cached -> pure $ Right cached
