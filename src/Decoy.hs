@@ -8,6 +8,8 @@ module Decoy
   , addRules
   , removeRule
   , removeRules
+  , withRule
+  , withRules
   , reset
     -- * Types
   , DecoyCtx(..)
@@ -16,13 +18,14 @@ module Decoy
   ) where
 
 import qualified Control.Concurrent.Async as Async
-import           Control.Concurrent.Async (Async)
 import           Control.Concurrent.MVar
+import           Control.Exception (bracket)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as BS8
+import           Data.Foldable
 import qualified Data.Map.Strict as M
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as T
@@ -40,7 +43,7 @@ import           Decoy.Rule as Rule
 -- @since 0.1.0.0
 data DecoyCtx = DC
   { dcRouter :: MVar R.Router
-  , dcAsync :: Async ()
+  , dcRuleIds :: MVar (M.Map Rule.RuleId [Rule.PathPart])
   , dcRulesFile :: Maybe FilePath
   , dcFileCache :: MVar FileCache
   }
@@ -63,10 +66,17 @@ withDecoyServer port mRulesFile cont = do
   rules <- loadRulesFile mRulesFile
   initRouterMVar <- newMVar $ R.mkRouter rules
   initFileCache <- newMVar mempty
-  Async.withAsync (Warp.run port $ app initRouterMVar initFileCache mRulesFile) $ \async ->
-    cont DC
+  initRuleIds <- newMVar mempty
+  let dc = DC
+        { dcRouter = initRouterMVar
+        , dcRuleIds = initRuleIds
+        , dcRulesFile = mRulesFile
+        , dcFileCache = initFileCache
+        }
+  Async.withAsync (Warp.run port $ app dc)
+    $ \_ -> cont DC
       { dcRouter = initRouterMVar
-      , dcAsync = async
+      , dcRuleIds = initRuleIds
       , dcRulesFile = mRulesFile
       , dcFileCache = initFileCache
       }
@@ -75,36 +85,85 @@ withDecoyServer port mRulesFile cont = do
 --
 -- @since 0.1.0.0
 runDecoyServer :: Warp.Port -> Maybe FilePath -> IO ()
-runDecoyServer port mRulesFile =
-  withDecoyServer port mRulesFile $ Async.wait . dcAsync
+runDecoyServer port mRulesFile = do
+  rules <- loadRulesFile mRulesFile
+  initRouterMVar <- newMVar $ R.mkRouter rules
+  initFileCache <- newMVar mempty
+  initRuleIds <- newMVar mempty
+  let dc = DC
+        { dcRouter = initRouterMVar
+        , dcRuleIds = initRuleIds
+        , dcRulesFile = mRulesFile
+        , dcFileCache = initFileCache
+        }
+  Warp.run port $ app dc
 
 -- | Add a new rule to running decoy server.
 --
 -- @since 0.1.0.0
-addRule :: DecoyCtx -> Rule -> IO ()
-addRule dc rule = addRules dc [rule]
+addRule :: DecoyCtx -> Rule -> IO RuleId
+addRule dc rule = do
+  rId <- newRuleId dc rule
+  modifyMVar (dcRouter dc) $ \router ->
+    pure ( R.addRouterRule rule {ruleId = rId} router
+         , rId
+         )
 
-addRules :: DecoyCtx -> [Rule] -> IO ()
-addRules dc rules = modifyMVar_ (dcRouter dc) (pure . R.addRouterRules rules)
+newRuleId :: DecoyCtx -> Rule -> IO RuleId
+newRuleId dc rule = do
+  modifyMVar (dcRuleIds dc) $ \rIds -> do
+    let newId = maybe initRuleId (succ . fst) (M.lookupMax rIds)
+    pure ( M.insert newId (reqPath (request rule)) rIds
+         , newId
+         )
+
+addRules :: DecoyCtx -> [Rule] -> IO [RuleId]
+addRules dc = traverse (addRule dc)
 
 -- | Remove a rule from a decoy server.
 --
 -- @since 0.1.0.0
-removeRule :: DecoyCtx -> Rule -> IO ()
-removeRule dc rule = removeRules dc [rule]
+removeRule :: DecoyCtx -> RuleId -> IO ()
+removeRule dc rId = do
+  rIds <- readMVar $ dcRuleIds dc
+  let mPath = M.lookup rId rIds
+  for_ mPath $ \path ->
+    modifyMVar_ (dcRouter dc) $ pure . R.removeRouterRule rId path
+  modifyMVar_ (dcRuleIds dc) $ pure . M.delete rId
 
-removeRules :: DecoyCtx -> [Rule] -> IO ()
-removeRules dc rules = modifyMVar_ (dcRouter dc) (pure . R.removeRouterRules rules)
+removeRules :: DecoyCtx -> [RuleId] -> IO ()
+removeRules dc = traverse_ (removeRule dc)
+
+-- | Run an action with a given rule added and remove it afterwards
+--
+-- @since 0.1.0.0
+withRule :: DecoyCtx -> Rule -> IO a -> IO a
+withRule dc rule action =
+  bracket
+    (addRule dc rule)
+    (removeRule dc)
+    (const action)
+
+-- | Run an action with the given rules added and remove them afterwards
+--
+-- @since 0.1.0.0
+withRules :: DecoyCtx -> [Rule] -> IO a -> IO a
+withRules dc rules action =
+  bracket
+    (addRules dc rules)
+    (removeRules dc)
+    (const action)
 
 -- | Resets a running server to its initial state.
 --
 -- @since 0.1.0.0
 reset :: DecoyCtx -> IO ()
-reset dc =
+reset dc = do
   putMVar (dcRouter dc) . R.mkRouter
     =<< loadRulesFile (dcRulesFile dc)
+  putMVar (dcRuleIds dc) mempty
 
-loadRulesFile :: Maybe FilePath -> IO [Rule]
+loadRulesFile :: Maybe FilePath -> IO [RuleWithId]
 loadRulesFile Nothing = pure []
 loadRulesFile (Just rulesFile) = do
   rulesFileExists <- Dir.doesPathExist rulesFile
@@ -113,11 +172,11 @@ loadRulesFile (Just rulesFile) = do
        values <- Aeson.eitherDecodeFileStrict rulesFile
        case traverse compileRule =<< values of
          Left err -> fail $ "Failed to parse rules file: " <> err
-         Right rules -> pure rules
+         Right rules -> pure $ zipWith (\r i -> r {ruleId = i}) rules [initRuleId..]
      else fail $ "File does not exist: " <> rulesFile
 
-app :: MVar R.Router -> MVar FileCache -> Maybe FilePath -> Wai.Application
-app routerMVar fileCacheMVar mRulesFile req respHandler = do
+app :: DecoyCtx -> Wai.Application
+app dc req respHandler = do
   let reqPath = Wai.pathInfo req
       queryMap = M.mapKeys TE.decodeUtf8Lenient
                . fmap (fmap TE.decodeUtf8Lenient)
@@ -142,8 +201,9 @@ app routerMVar fileCacheMVar mRulesFile req respHandler = do
                   . Wai.responseLBS Http.badRequest400 []
                   $ "Invalid JSON: " <> BS8.pack err
         Right rule -> do
-          modifyMVar_ routerMVar (pure . R.addRouterRule rule)
-          respHandler $ Wai.responseLBS Http.ok200 [] "Rules added"
+          rId <- addRule dc rule
+          respHandler $ jsonResponse rId
+
     ["_add-rules"] ->
       case traverse compileRule
              =<< Aeson.parseEither Aeson.parseJSON
@@ -153,15 +213,15 @@ app routerMVar fileCacheMVar mRulesFile req respHandler = do
                   . Wai.responseLBS Http.badRequest400 []
                   $ "Invalid JSON: " <> BS8.pack err
         Right rules -> do
-          modifyMVar_ routerMVar (pure . R.addRouterRules rules)
-          respHandler $ Wai.responseLBS Http.ok200 [] "Rules added"
+          rIds <- addRules dc rules
+          respHandler $ jsonResponse rIds
 
     ["_reset-rules"] -> do
-      putMVar routerMVar . R.mkRouter =<< loadRulesFile mRulesFile
+      putMVar (dcRouter dc) . R.mkRouter =<< loadRulesFile (dcRulesFile dc)
       respHandler $ Wai.responseLBS Http.ok200 [] "Rules reset"
 
     _ -> do
-      router <- readMVar routerMVar
+      router <- readMVar $ dcRouter dc
       respHandler =<<
         case eReqBodyJson of
           Left err -> pure . Wai.responseLBS Http.badRequest400 []
@@ -170,7 +230,7 @@ app routerMVar fileCacheMVar mRulesFile req respHandler = do
             case R.matchEndpoint queryMap reqBodyBS mReqJson reqHeaders reqMethod router reqPath of
               Nothing -> pure $ Wai.responseLBS Http.notFound404 [] "No rule matched"
               Just matched ->
-                handleMatchedEndpoint queryMap mReqJson fileCacheMVar matched
+                handleMatchedEndpoint queryMap mReqJson (dcFileCache dc) matched
 
 handleMatchedEndpoint
   :: R.QueryParams
@@ -229,3 +289,11 @@ getFileCache fileCacheMVar file = do
             modifyMVar_ fileCacheMVar $ pure . M.insert file content
             pure $ Right content
     Just cached -> pure $ Right cached
+
+jsonResponse
+  :: Aeson.ToJSON body
+  => body
+  -> Wai.Response
+jsonResponse body =
+  Wai.responseLBS Http.ok200 [(Http.hContentType, "application/json")]
+    $ Aeson.encode body

@@ -1,9 +1,12 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DerivingStrategies #-}
 module Decoy.Rule
   ( -- * Types
     RuleF(..)
   , Rule
+  , RuleId(..)
+  , RuleWithId
   , RuleSpec
   , Response(..)
   , ResponseBody(..)
@@ -16,6 +19,7 @@ module Decoy.Rule
   -- * Instantiating rules
   , mkRuleSpec
   , compileRule
+  , initRuleId
   -- * Rule modifiers
   , setUrlPath
   , addQueryRule
@@ -37,23 +41,54 @@ import qualified Data.Text as T
 import qualified Text.Megaparsec as P
 import qualified Text.Mustache as Stache
 
+-- | Identifier assigned to a rule by a server instance
+--
+-- @since 0.1.0.0
+newtype RuleId = MkRuleId Int
+  deriving (Enum, Eq, Ord, Show)
+  deriving newtype (ToJSON, FromJSON)
+
+-- | Rule ID to seed a server with
+initRuleId :: RuleId
+initRuleId = MkRuleId 1
+
+data NoId = NoId deriving Show
+
+-- | A rule that has had an ID assigned by the server
+--
+-- @since 0.1.0.0
+type RuleWithId = RuleF QueryRules
+                        [PathPart]
+                        [JP.JSONPathElement]
+                        RuleId
+                        Stache.Template
+
 -- | A rule that has been fully instantiated and can be added to a server instance.
 --
 -- @since 0.1.0.0
-type Rule = RuleF QueryRules [PathPart] [JP.JSONPathElement] Stache.Template
+type Rule = RuleF QueryRules
+                  [PathPart]
+                  [JP.JSONPathElement]
+                  NoId
+                  Stache.Template
 
 -- | A specification for a rule. Construct this using 'mkRuleSpec' and convert
 -- to a 'Rule' using 'compileRule'.
 --
 -- @since 0.1.0.0
-type RuleSpec = RuleF [QueryRule] T.Text T.Text T.Text
+type RuleSpec = RuleF [QueryRule]
+                      T.Text
+                      T.Text
+                      NoId
+                      T.Text
 
 -- | Base type for a rule, which can either be a 'Rule' or 'RuleSpec'.
 --
 -- @since 0.1.0.0
-data RuleF queryRules urlPath jsonPath template = MkRule
+data RuleF queryRules urlPath jsonPath ruleId template = MkRule
   { request :: Request queryRules urlPath jsonPath
   , response :: Response template
+  , ruleId :: ruleId
   } deriving (Show, Eq, Functor)
 
 -- | Request portion of a rule.
@@ -159,6 +194,7 @@ mkRuleSpec urlPath body =
         , respContentType = Nothing
         , respStatusCode = Nothing
         }
+    , ruleId = NoId
     }
 
 -- | Set the URL path of a 'RuleSpec'.
@@ -202,7 +238,7 @@ setQueryRules q r = r { request = (request r) { reqQueryRules = q } }
 -- @
 --
 -- @since 0.1.0.0
-setReqMethod :: T.Text -> RuleF a b c d -> RuleF a b c d
+setReqMethod :: T.Text -> RuleF a b c d e -> RuleF a b c d e
 setReqMethod m r = r { request = (request r) { reqMethod = Just m } }
 
 -- | Set a content type that must be contained in the @Content-Type@ header
@@ -215,7 +251,7 @@ setReqMethod m r = r { request = (request r) { reqMethod = Just m } }
 -- @
 --
 -- @since 0.1.0.0
-setReqContentType :: T.Text -> RuleF a b c d -> RuleF a b c d
+setReqContentType :: T.Text -> RuleF a b c d e -> RuleF a b c d e
 setReqContentType c r = r { request = (request r) { reqContentType = Just c } }
 
 -- | Add a body rule which must match against the request body for the endpoint
@@ -263,7 +299,7 @@ setBody b r = r { response = (response r) { respBody = b } }
 -- @
 --
 -- @since 0.1.0.0
-setRespContentType :: T.Text -> RuleF a b c d -> RuleF a b c d
+setRespContentType :: T.Text -> RuleF a b c d e -> RuleF a b c d e
 setRespContentType c r = r { response = (response r) { respContentType = Just c } }
 
 -- | Set the status code of the response returned if the given rule matches.
@@ -275,7 +311,7 @@ setRespContentType c r = r { response = (response r) { respContentType = Just c 
 -- @
 --
 -- @since 0.1.0.0
-setStatusCode :: Word -> RuleF a b c d -> RuleF a b c d
+setStatusCode :: Word -> RuleF a b c d e -> RuleF a b c d e
 setStatusCode c r = r { response = (response r) { respStatusCode = Just c } }
 
 -- | Attempts to convert a 'RuleSpec' to a 'Rule'. It will return a @Left@ if
@@ -288,6 +324,7 @@ compileRule rs = do
   req <- traverse (first P.errorBundlePretty . P.runParser (JP.jsonPath P.eof) "")
        $ request rs
 
+
   Right MkRule
     { response = body
     , request = req { reqPath = pathFromText $ reqPath req
@@ -295,6 +332,7 @@ compileRule rs = do
                         M.fromList $ (\q -> (queryParam q, expectedValue q))
                                  <$> reqQueryRules req
                     }
+    , ruleId = NoId
     }
 
 instance FromJSON RuleSpec where
@@ -302,6 +340,7 @@ instance FromJSON RuleSpec where
     MkRule
     <$> o .: "request"
     <*> o .: "response"
+    <*> pure NoId
 
 instance FromJSON (Response T.Text) where
   parseJSON = withObject "response" $ \o -> do

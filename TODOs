@@ -1,6 +1,3 @@
 Write docs
-Assign an ID to rules so that they can be removed based on that ID
- - withRule function
 Allow for deleting rules via the _rules endpoint
-File response should be a mustache template
 Rename rule endpoint. Add endpoint for adding single rule. removing rules as well?

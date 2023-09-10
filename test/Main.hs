@@ -4,7 +4,7 @@ module Main (main) where
 
 import qualified Data.Aeson as Aeson
 import           Data.Aeson.QQ
-import           Data.Foldable
+import           Data.Either
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import           Network.HTTP.Simple
@@ -33,18 +33,18 @@ tests dc = testGroup "Tests"
 addRulesByRequest :: Assertion
 addRulesByRequest = do
   let rule = mkRuleSpec "this/is/a/path" (Template "This is a response")
-  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
   resp <- httpBS "GET http://localhost:9000/this/is/a/path"
   getResponseBody resp @?= "This is a response"
 
 addRulesByApi :: DecoyCtx -> Assertion
 addRulesByApi dc = do
-  let rules = compileRule $ mkRuleSpec "this/is/another/path" $ Template "This is another response"
-  traverse_ (addRule dc) rules
+  let rule = fromRight undefined . compileRule $ mkRuleSpec "this/is/another/path" $ Template "This is another response"
+  rId <- addRule dc rule
   resp <- httpBS "GET http://localhost:9000/this/is/another/path"
   getResponseBody resp @?= "This is another response"
 
-  traverse_ (removeRule dc) rules
+  removeRule dc rId
   resp2 <- httpBS "GET http://localhost:9000/this/is/another/path"
   getResponseStatusCode resp2 @?= 404
 
@@ -54,7 +54,7 @@ bodyRegex = do
                                     , jsonPathOpts = Nothing
                                     }
            $ mkRuleSpec "this/is/a/path" (Template "regex matched")
-  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
   resp <- httpBS (setRequestBody "testing" "GET http://localhost:9000/this/is/a/path")
   getResponseBody resp @?= "regex matched"
 
@@ -68,7 +68,7 @@ jsonRegex = do
                   }
                 }
            $ mkRuleSpec "this/is/a/path" $ Template "json regex matched"
-  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
   resp <- httpBS (setRequestBodyJSON
                     [aesonQQ| {field:{field2:"hello"}} |]
                     "POST http://localhost:9000/this/is/a/path")
@@ -80,7 +80,7 @@ requestMethod = do
         [ setReqMethod "GET" . mkRuleSpec "reqmeth" $ Template "get"
         , setReqMethod "POST" . mkRuleSpec "reqmeth" $ Template "post"
         ]
-  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
   resp <- httpBS "POST http://localhost:9000/reqmeth"
   getResponseBody resp @?= "post"
 
@@ -90,7 +90,7 @@ reqCT = do
         [ setReqContentType "text/plain" . mkRuleSpec "reqct" $ Template "text"
         , setReqContentType "application/json" . mkRuleSpec "reqct" $ Template "json"
         ]
-  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
   resp <- httpBS (setRequestBodyJSON [aesonQQ| {field: true} |] "POST http://localhost:9000/reqct")
   getResponseBody resp @?= "json"
 
@@ -100,7 +100,7 @@ respCT = do
         [ setRespContentType "text/plain" . mkRuleSpec "respct" $ Template "text"
         , setRespContentType "application/json" . mkRuleSpec "respct" $ Template "\"json\""
         ]
-  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
   resp <- httpJSON "GET http://localhost:9000/respct"
   getResponseBody resp @?= Aeson.String "json"
   resp2 <- httpBS (addRequestHeader H.hAccept "text/plain" "GET http://localhost:9000/respct")
@@ -109,14 +109,14 @@ respCT = do
 respStatus :: Assertion
 respStatus = do
   let rule = setStatusCode 500 . mkRuleSpec "statusc" $ Template "text"
-  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
   resp <- httpBS "GET http://localhost:9000/statusc"
   getResponseStatusCode resp @?= 500
 
 pathParam :: Assertion
 pathParam = do
   let rule = mkRuleSpec "param/path/:param" $ Template "param: {{path.param}}"
-  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
   resp <- httpBS "GET http://localhost:9000/param/path/yo"
   getResponseBody resp @?= "param: yo"
 
@@ -126,13 +126,13 @@ queryStringMatch = do
         [ addQueryRule (MkQueryRule "query" (Just "one")) . mkRuleSpec "query/string" $ Template "one"
         , addQueryRule (MkQueryRule "query" (Just "two")) . mkRuleSpec "query/string" $ Template "two"
         ]
-  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
   resp <- httpBS "GET http://localhost:9000/query/string?query=two"
   getResponseBody resp @?= "two"
 
 queryStringArg :: Assertion
 queryStringArg = do
   let rule = mkRuleSpec "query/string/arg" $ Template "query: {{query.arg}}"
-  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_rules")
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
   resp <- httpBS "GET http://localhost:9000/query/string/arg?arg=sup"
   getResponseBody resp @?= "query: sup"

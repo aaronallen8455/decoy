@@ -39,18 +39,18 @@ data Router = RouterNode
 emptyRouter :: Router
 emptyRouter = RouterNode M.empty Nothing []
 
-mkRouter :: [Rule] -> Router
+mkRouter :: [RuleWithId] -> Router
 mkRouter rules = addRouterRules rules emptyRouter
 
 data Endpoint = MkEndpoint
   { epPathParamNames :: [T.Text]
-  , epRule :: Rule
+  , epRule :: RuleWithId
   }
 
-addRouterRules :: [Rule] -> Router -> Router
+addRouterRules :: [RuleWithId] -> Router -> Router
 addRouterRules rules router = foldr addRouterRule router rules
 
-addRouterRule :: Rule -> Router -> Router
+addRouterRule :: RuleWithId -> Router -> Router
 addRouterRule rule = go [] (reqPath $ request rule) where
   go pathParams (Static pathPart : rest) router =
     let inner = fromMaybe emptyRouter . M.lookup pathPart $ staticPaths router
@@ -67,13 +67,13 @@ addRouterRule rule = go [] (reqPath $ request rule) where
               } : endpoints router
            }
 
-removeRouterRules :: [Rule] -> Router -> Router
-removeRouterRules rules router = foldr removeRouterRule router rules
+removeRouterRules :: [(RuleId, [PathPart])] -> Router -> Router
+removeRouterRules rules router = foldr (uncurry removeRouterRule) router rules
 
-removeRouterRule :: Rule -> Router -> Router
-removeRouterRule rule = go (reqPath $ request rule) where
+removeRouterRule :: RuleId -> [PathPart] -> Router -> Router
+removeRouterRule rId = go where
   go [] router =
-    let matches r = void r == void rule
+    let matches r = ruleId r == rId
      in router { endpoints = filter (not . matches . epRule) $ endpoints router }
   go (Static path : rest) router =
     router { staticPaths = M.alter (fmap $ go rest) path
