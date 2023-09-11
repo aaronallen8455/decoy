@@ -29,10 +29,17 @@ by adding rules to server dynamically while it is running.
 
 To add a rules dynamically, send a post request to the `_add-rules` endpoint
 with an array of JSON specifications for the rules to be added as the request
-body. For example, if the server is running on port 9000, the request would be
-sent to `http://localhost:9000/_add-rules`. The JSON for specifying a rule is
-outlined below. There is an `_add-rule` endpoint for adding a single rule
-rather than an array of rules.
+body. The response will be a JSON array of the IDs assigned to those rules in
+the order they were sent. For example, if the server is running on port 9000,
+the request would be sent to `http://localhost:9000/_add-rules`. The JSON for
+specifying a rule is outlined below. There is also an `_add-rule` endpoint for
+adding a single rule rather than an array of rules which returns a single rule ID.
+
+Rules can be removed from a server using the `_remove-rules` and `_remove-rule`
+endpoints which take as the request body an array of rule IDs or a single rule
+ID respectively.
+
+The server can be reset to to its initial state by hitting the `_reset` endpoint.
 
 ## Rule specification
 The [JSON schema](https://json-schema.org) for the rule specification object
