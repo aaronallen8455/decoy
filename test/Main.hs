@@ -28,6 +28,7 @@ tests dc = testGroup "Tests"
   , testCase "Path param" pathParam
   , testCase "Query string match" queryStringMatch
   , testCase "Query string arg" queryStringArg
+  , testCase "Remove rule via request" removeRuleByRequest
   ]
 
 addRulesByRequest :: Assertion
@@ -133,6 +134,23 @@ queryStringMatch = do
 queryStringArg :: Assertion
 queryStringArg = do
   let rule = mkRuleSpec "query/string/arg" $ Template "query: {{query.arg}}"
-  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
+  _ <- httpNoBody (setRequestBodyJSON rule "POST http://localhost:9000/_add-rule")
   resp <- httpBS "GET http://localhost:9000/query/string/arg?arg=sup"
   getResponseBody resp @?= "query: sup"
+
+removeRuleByRequest :: Assertion
+removeRuleByRequest = do
+  let rules =
+        [ mkRuleSpec "delete/me" $ Template "one"
+        , mkRuleSpec "delete/me2" $ Template "two"
+        ]
+  rIds :: [RuleId] <- getResponseBody <$>
+    httpJSON (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
+  resp <- httpBS "GET http://localhost:9000/delete/me"
+  getResponseBody resp @?= "one"
+  _ <- httpNoBody (setRequestBodyJSON (head rIds) "POST http://localhost:9000/_remove-rule")
+  resp2 <- httpBS "GET http://localhost:9000/delete/me"
+  getResponseStatusCode resp2 @?= 404
+  _ <- httpNoBody (setRequestBodyJSON (drop 1 rIds) "POST http://localhost:9000/_remove-rules")
+  resp3 <- httpBS "GET http://localhost:9000/delete/me2"
+  getResponseStatusCode resp3 @?= 404

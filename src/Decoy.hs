@@ -216,6 +216,28 @@ app dc req respHandler = do
           rIds <- addRules dc rules
           respHandler $ jsonResponse rIds
 
+    ["_remove-rule"] ->
+      case Aeson.parseEither Aeson.parseJSON
+             =<< maybe (Left "No body") Right
+             =<< eReqBodyJson of
+        Left err -> respHandler
+                  . Wai.responseLBS Http.badRequest400 []
+                  $ "Invalid JSON: " <> BS8.pack err
+        Right rId -> do
+          removeRule dc rId
+          respHandler $ Wai.responseLBS Http.ok200 [] "Rule removed"
+
+    ["_remove-rules"] ->
+      case Aeson.parseEither Aeson.parseJSON
+             =<< maybe (Left "No body") Right
+             =<< eReqBodyJson of
+        Left err -> respHandler
+                  . Wai.responseLBS Http.badRequest400 []
+                  $ "Invalid JSON: " <> BS8.pack err
+        Right rIds -> do
+          removeRules dc rIds
+          respHandler $ Wai.responseLBS Http.ok200 [] "Rules removed"
+
     ["_reset-rules"] -> do
       putMVar (dcRouter dc) . R.mkRouter =<< loadRulesFile (dcRulesFile dc)
       respHandler $ Wai.responseLBS Http.ok200 [] "Rules reset"
