@@ -3,6 +3,7 @@ module Decoy
   ( -- * Starting a server instance
     withDecoyServer
   , runDecoyServer
+  , decoyServerAsync
     -- * Modify a running instance
   , addRule
   , addRules
@@ -74,12 +75,24 @@ withDecoyServer port mRulesFile cont = do
         , dcFileCache = initFileCache
         }
   Async.withAsync (Warp.run port $ app dc)
-    $ \_ -> cont DC
-      { dcRouter = initRouterMVar
-      , dcRuleIds = initRuleIds
-      , dcRulesFile = mRulesFile
-      , dcFileCache = initFileCache
-      }
+    $ \_ -> cont dc
+
+-- | Run a decoy server in the returned @Async@. The caller is responsible for
+-- canceling the async.
+decoyServerAsync :: Warp.Port -> Maybe FilePath -> IO (DecoyCtx, Async.Async ())
+decoyServerAsync port mRulesFile = do
+  rules <- loadRulesFile mRulesFile
+  initRouterMVar <- newMVar $ R.mkRouter rules
+  initFileCache <- newMVar mempty
+  initRuleIds <- newMVar mempty
+  let dc = DC
+        { dcRouter = initRouterMVar
+        , dcRuleIds = initRuleIds
+        , dcRulesFile = mRulesFile
+        , dcFileCache = initFileCache
+        }
+  async <- Async.async (Warp.run port $ app dc)
+  pure (dc, async)
 
 -- | Run a decoy server synchronously given a port and optional rules file.
 --

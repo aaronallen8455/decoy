@@ -161,8 +161,9 @@ data PathPart
   deriving (Show, Eq)
 
 pathFromText :: T.Text -> [PathPart]
-pathFromText txt = parsePart <$> T.split (== '/') txt
+pathFromText txt = parsePart <$> T.split (== '/') (dropSlashes txt)
   where
+    dropSlashes = T.dropWhile (== '/') . T.dropWhileEnd (== '/')
     parsePart p =
       case T.stripPrefix ":" p of
         Nothing -> Static p
