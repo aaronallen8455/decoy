@@ -200,7 +200,7 @@ app dc req respHandler = do
   reqBodyBS <- Wai.strictRequestBody req
   let eReqBodyJson =
         case lookup Http.hContentType reqHeaders of
-          Just ct | "json" `BS.isInfixOf` ct ->
+          Just ct | "json" `BS.isInfixOf` ct && not (BS8.null reqBodyBS) ->
             Just <$> Aeson.eitherDecode reqBodyBS
           _ -> Right Nothing
 
