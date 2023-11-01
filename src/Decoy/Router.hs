@@ -18,12 +18,15 @@ import           Control.Applicative ((<|>), empty)
 import           Control.Monad
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.CaseInsensitive as CI
 import           Data.Foldable
 import qualified Data.JSONPath as JP
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import           Data.These (These(..))
+import qualified Data.Zip as Zip
 import qualified Network.HTTP.Types as Http
 import qualified Text.Mustache as Stache
 import qualified Text.Regex.TDFA as Regex
@@ -111,6 +114,8 @@ matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
 
     guard $ matchQuery (reqQueryRules . request $ epRule ep) queryParams
 
+    guard $ matchHeaders (reqHeaderRules . request $ epRule ep) reqHeaders
+
     let resp = response $ epRule ep
     for_ (reqContentType . request $ epRule ep) $ \ct ->
       maybe empty (guard . (ct `T.isInfixOf`) . TE.decodeUtf8Lenient)
@@ -147,12 +152,24 @@ matchBody bodyRules rawBody mBodyJson = all match bodyRules where
           other -> Aeson.encode other Regex.=~ regex rule
     _ -> False
 
-matchQuery :: QueryRules -> QueryParams -> Bool
+matchQuery :: KeyValRules -> QueryParams -> Bool
 matchQuery queryRules queryMap = and $ (`map` M.toList queryRules) $
   \(name, mVal) ->
     case M.lookup name queryMap of
       Nothing -> False
       Just qv -> maybe (const True) (maybe False . (==)) mVal qv
+
+matchHeaders :: KeyValRules -> Http.RequestHeaders -> Bool
+matchHeaders headerRules reqHeaders
+    = and
+    $ Zip.alignWith checkRule
+        (fmap TE.encodeUtf8 <$> M.mapKeys (CI.mk . TE.encodeUtf8) headerRules)
+        (M.fromList reqHeaders)
+  where
+    checkRule (This _) = False
+    checkRule (That _) = True
+    checkRule (These mExpected actual) =
+      maybe (const True) (==) mExpected actual
 
 type QueryParams = M.Map T.Text (Maybe T.Text)
 type PathArgs = M.Map T.Text T.Text

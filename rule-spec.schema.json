@@ -20,21 +20,13 @@
         },
         "queryRules": {
           "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["queryParam"],
-            "properties": {
-              "queryParam": {
-                "type": "string",
-                "description": "The required query param."
-              },
-              "expectedValue": {
-                "type": ["string", "null"],
-                "description": "If specified, the value that must be assigned to the param."
-              }
-            }
-          },
+          "items": { "$ref": "#/$defs/keyValRule" },
           "description": "Conditions pertaining to the requested URL's query string"
+        },
+        "headerRules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/keyValRule" },
+          "description": "Conditions pertaining to the request's headers"
         },
         "method": {
           "type": ["string", "null"],
@@ -73,6 +65,22 @@
         "statusCode": {
           "type": ["integer", "null"],
           "description": "The status code that should be returned. If not specified, 200 is used."
+        }
+      }
+    },
+    "keyValRule": {
+      "title": "KeyValRule",
+      "type": "object",
+      "description": "",
+      "required": ["key"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": ""
+        },
+        "expectedValue": {
+          "type": ["string", "null"],
+          "description": ""
         }
       }
     },

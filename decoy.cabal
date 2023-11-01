@@ -36,7 +36,10 @@ library
                       directory,
                       jsonpath,
                       regex-tdfa,
-                      megaparsec
+                      megaparsec,
+                      semialign,
+                      these,
+                      case-insensitive
     hs-source-dirs:   src
     default-language: GHC2021
 

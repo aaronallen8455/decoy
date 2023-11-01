@@ -31,6 +31,7 @@ tests dc = testGroup "Tests"
   , testCase "Remove rule via request" removeRuleByRequest
   , testCase "Deals with slashes" slashes
   , testCase "Empty component" emptyComponent
+  , testCase "Header rules" headerMatch
   ]
 
 addRulesByRequest :: Assertion
@@ -126,8 +127,8 @@ pathParam = do
 queryStringMatch :: Assertion
 queryStringMatch = do
   let rules =
-        [ addQueryRule (MkQueryRule "query" (Just "one")) . mkRuleSpec "query/string" $ Template "one"
-        , addQueryRule (MkQueryRule "query" (Just "two")) . mkRuleSpec "query/string" $ Template "two"
+        [ addQueryRule (MkKeyValRule "query" (Just "one")) . mkRuleSpec "query/string" $ Template "one"
+        , addQueryRule (MkKeyValRule "query" (Just "two")) . mkRuleSpec "query/string" $ Template "two"
         ]
   _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
   resp <- httpBS "GET http://localhost:9000/query/string?query=two"
@@ -195,3 +196,18 @@ emptyComponent = do
   getResponseBody resp5 @?= "four"
   resp6 <- httpBS "GET http://localhost:9000///"
   getResponseBody resp6 @?= "five"
+
+headerMatch :: Assertion
+headerMatch = do
+  let rules =
+        [ addHeaderRule (MkKeyValRule "header" (Just "one")) . mkRuleSpec "header/check" $ Template "one"
+        , addHeaderRule (MkKeyValRule "header" (Just "two")) . mkRuleSpec "header/check" $ Template "two"
+        , addHeaderRule (MkKeyValRule "header" Nothing) . mkRuleSpec "header/check2" $ Template "ok"
+        ]
+  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
+  resp <- httpBS $ addRequestHeader "header" "two" "GET http://localhost:9000/header/check/"
+  getResponseBody resp @?= "two"
+  resp2 <- httpBS $ addRequestHeader "header" "blah" "GET http://localhost:9000/header/check2"
+  getResponseBody resp2 @?= "ok"
+  resp3 <- httpBS "GET http://localhost:9000/header/check2"
+  getResponseStatusCode resp3 @?= 404

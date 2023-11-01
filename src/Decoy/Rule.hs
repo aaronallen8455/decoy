@@ -13,8 +13,8 @@ module Decoy.Rule
   , Request(..)
   , JsonPathOpts(..)
   , BodyRule(..)
-  , QueryRule(..)
-  , QueryRules
+  , KeyValRule(..)
+  , KeyValRules
   , PathPart(..)
   -- * Instantiating rules
   , mkRuleSpec
@@ -24,6 +24,8 @@ module Decoy.Rule
   , setUrlPath
   , addQueryRule
   , setQueryRules
+  , addHeaderRule
+  , setHeaderRules
   , setReqMethod
   , setReqContentType
   , addBodyRule
@@ -58,7 +60,7 @@ data NoId = NoId deriving Show
 -- | A rule that has had an ID assigned by the server
 --
 -- @since 0.1.0.0
-type RuleWithId = RuleF QueryRules
+type RuleWithId = RuleF KeyValRules
                         [PathPart]
                         [JP.JSONPathElement]
                         RuleId
@@ -67,7 +69,7 @@ type RuleWithId = RuleF QueryRules
 -- | A rule that has been fully instantiated and can be added to a server instance.
 --
 -- @since 0.1.0.0
-type Rule = RuleF QueryRules
+type Rule = RuleF KeyValRules
                   [PathPart]
                   [JP.JSONPathElement]
                   NoId
@@ -77,7 +79,7 @@ type Rule = RuleF QueryRules
 -- to a 'Rule' using 'compileRule'.
 --
 -- @since 0.1.0.0
-type RuleSpec = RuleF [QueryRule]
+type RuleSpec = RuleF [KeyValRule]
                       T.Text
                       T.Text
                       NoId
@@ -86,8 +88,8 @@ type RuleSpec = RuleF [QueryRule]
 -- | Base type for a rule, which can either be a 'Rule' or 'RuleSpec'.
 --
 -- @since 0.1.0.0
-data RuleF queryRules urlPath jsonPath ruleId template = MkRule
-  { request :: Request queryRules urlPath jsonPath
+data RuleF keyValRules urlPath jsonPath ruleId template = MkRule
+  { request :: Request keyValRules urlPath jsonPath
   , response :: Response template
   , ruleId :: ruleId
   } deriving (Show, Eq, Functor)
@@ -95,22 +97,23 @@ data RuleF queryRules urlPath jsonPath ruleId template = MkRule
 -- | Request portion of a rule.
 --
 -- @since 0.1.0.0
-data Request queryRules urlPath jsonPath = MkRequest
+data Request keyValRules urlPath jsonPath = MkRequest
   { reqPath :: urlPath
-  , reqQueryRules :: queryRules
+  , reqQueryRules :: keyValRules
   , reqMethod :: Maybe T.Text
   , reqContentType :: Maybe T.Text
+  , reqHeaderRules :: keyValRules
   , reqBodyRules :: [BodyRule jsonPath]
   } deriving (Show, Eq, Functor, Foldable, Traversable)
 
-type QueryRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value
+type KeyValRules = M.Map T.Text (Maybe T.Text) -- TODO ignore vs require no value
 
--- | Specifies a query param that must be present for a rule to match and
--- optionally whether a specific value must be mapped to that param.
+-- | Specifies a query param or header that must be present for a rule to match
+-- and optionally whether a specific value must be mapped to that param.
 --
 -- @since 0.1.0.0
-data QueryRule = MkQueryRule
-  { queryParam :: T.Text
+data KeyValRule = MkKeyValRule
+  { keyName :: T.Text
   , expectedValue :: Maybe T.Text
   } deriving (Show, Eq)
 
@@ -194,7 +197,8 @@ mkRuleSpec urlPath body =
         , reqQueryRules = mempty
         , reqMethod = Nothing
         , reqContentType = Nothing
-        , reqBodyRules = []
+        , reqHeaderRules = mempty
+        , reqBodyRules = mempty
         }
     , response = MkResponse
         { respBody = body
@@ -215,17 +219,17 @@ setUrlPath p r = r { request = (request r) { reqPath = p } }
 -- __Examples:__
 --
 -- @
--- addQueryRule (MkQueryRule "key" Nothing) $ mkRuleSpec "some/path" (Template "body")
+-- addQueryRule (MkKeyValRule "key" Nothing) $ mkRuleSpec "some/path" (Template "body")
 -- @
 -- creates a rule that matches a request to @some/path?key@
 -- @
--- addQueryRule (MkQueryRule "key" (Just "val")) $ mkRuleSpec "some/path" (Template "body")
+-- addQueryRule (MkKeyValRule "key" (Just "val")) $ mkRuleSpec "some/path" (Template "body")
 -- @
 -- creates a rule that matches a request to @some/path?key=val@
 --
 -- @since 0.1.0.0
 addQueryRule
-  :: QueryRule
+  :: KeyValRule
   -> RuleSpec
   -> RuleSpec
 addQueryRule q r = r { request = (request r) { reqQueryRules = q : reqQueryRules (request r) } }
@@ -233,8 +237,35 @@ addQueryRule q r = r { request = (request r) { reqQueryRules = q : reqQueryRules
 -- | Replace all query rules within a rule.
 --
 -- @since 0.1.0.0
-setQueryRules :: [QueryRule] -> RuleSpec -> RuleSpec
+setQueryRules :: [KeyValRule] -> RuleSpec -> RuleSpec
 setQueryRules q r = r { request = (request r) { reqQueryRules = q } }
+
+-- | Add a request header rule.
+--
+-- __Examples:__
+--
+-- @
+-- addHeaderRule (MkKeyValRule "key" Nothing) $ mkRuleSpec "some/path" (Template "body")
+-- @
+-- creates a rule that matches if the request has a header called @key@ and any value
+-- @
+-- addHeaderRule (MkKeyValRule "key" (Just "val")) $ mkRuleSpec "some/path" (Template "body")
+-- @
+-- creates a rule that matches if the request has a header called @key@ which must have
+-- the value @val@.
+--
+-- @since 0.1.0.0
+addHeaderRule
+  :: KeyValRule
+  -> RuleSpec
+  -> RuleSpec
+addHeaderRule h r = r { request = (request r) { reqHeaderRules = h : reqHeaderRules (request r) } }
+
+-- | Replace all query rules within a rule.
+--
+-- @since 0.1.0.0
+setHeaderRules :: [KeyValRule] -> RuleSpec -> RuleSpec
+setHeaderRules h r = r { request = (request r) { reqHeaderRules = h } }
 
 -- | Specifies the request method that must be used for a rule to match.
 --
@@ -336,8 +367,11 @@ compileRule rs = do
     { response = body
     , request = req { reqPath = pathFromText $ reqPath req
                     , reqQueryRules =
-                        M.fromList $ (\q -> (queryParam q, expectedValue q))
+                        M.fromList $ (\q -> (keyName q, expectedValue q))
                                  <$> reqQueryRules req
+                    , reqHeaderRules =
+                        M.fromList $ (\q -> (keyName q, expectedValue q))
+                                 <$> reqHeaderRules req
                     }
     , ruleId = NoId
     }
@@ -363,13 +397,14 @@ instance FromJSON (Response T.Text) where
       <*> o .:? "contentType"
       <*> o .:? "statusCode"
 
-instance FromJSON (Request [QueryRule] T.Text T.Text) where
+instance FromJSON (Request [KeyValRule] T.Text T.Text) where
   parseJSON = withObject "request" $ \o ->
     MkRequest
     <$> o .: "path"
     <*> o .:? "queryRules" .!= []
     <*> o .:? "method"
     <*> o .:? "contentType"
+    <*> o .:? "headerRules" .!= []
     <*> o .:? "bodyRules" .!= []
 
 instance FromJSON (JsonPathOpts T.Text) where
@@ -384,10 +419,10 @@ instance FromJSON (BodyRule T.Text) where
     <$> o .:? "jsonPathOpts"
     <*> o .: "regex"
 
-instance FromJSON QueryRule where
+instance FromJSON KeyValRule where
   parseJSON = withObject "query rule" $ \o ->
-    MkQueryRule
-    <$> o .: "queryParam"
+    MkKeyValRule
+    <$> o .: "key"
     <*> o .:? "expectedValue"
 
 instance ToJSON RuleSpec where
@@ -412,12 +447,13 @@ instance ToJSON (Response T.Text) where
     , "statusCode" .= respStatusCode r
     ]
 
-instance ToJSON (Request [QueryRule] T.Text T.Text) where
+instance ToJSON (Request [KeyValRule] T.Text T.Text) where
   toJSON r = object
     [ "path" .= reqPath r
     , "queryRules" .= reqQueryRules r
     , "method" .= reqMethod r
     , "contentType" .= reqContentType r
+    , "headerRules".= reqHeaderRules r
     , "bodyRules" .= reqBodyRules r
     ]
 
@@ -427,9 +463,9 @@ instance ToJSON (BodyRule T.Text) where
     , "regex" .= regex r
     ]
 
-instance ToJSON QueryRule where
+instance ToJSON KeyValRule where
   toJSON r = object
-    [ "queryParam" .= queryParam r
+    [ "key" .= keyName r
     , "expectedValue" .= expectedValue r
     ]
 
