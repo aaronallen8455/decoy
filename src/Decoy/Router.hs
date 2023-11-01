@@ -34,7 +34,7 @@ data Router = RouterNode
   { staticPaths :: M.Map T.Text Router
   , paramPath :: Maybe Router
   , endpoints :: [Endpoint]
-  }
+  } deriving Show
 
 emptyRouter :: Router
 emptyRouter = RouterNode M.empty Nothing []
@@ -45,7 +45,7 @@ mkRouter rules = addRouterRules rules emptyRouter
 data Endpoint = MkEndpoint
   { epPathParamNames :: [T.Text]
   , epRule :: RuleWithId
-  }
+  } deriving Show
 
 addRouterRules :: [RuleWithId] -> Router -> Router
 addRouterRules rules router = foldr addRouterRule router rules

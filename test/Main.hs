@@ -29,6 +29,8 @@ tests dc = testGroup "Tests"
   , testCase "Query string match" queryStringMatch
   , testCase "Query string arg" queryStringArg
   , testCase "Remove rule via request" removeRuleByRequest
+  , testCase "Deals with slashes" slashes
+  , testCase "Empty component" emptyComponent
   ]
 
 addRulesByRequest :: Assertion
@@ -154,3 +156,42 @@ removeRuleByRequest = do
   _ <- httpNoBody (setRequestBodyJSON (drop 1 rIds) "POST http://localhost:9000/_remove-rules")
   resp3 <- httpBS "GET http://localhost:9000/delete/me2"
   getResponseStatusCode resp3 @?= 404
+
+slashes :: Assertion
+slashes = do
+  let rules =
+        [ mkRuleSpec "trail/slash/" $ Template "one"
+        , mkRuleSpec "/lead/slash" $ Template "two"
+        ]
+  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
+  resp <- httpBS "GET http://localhost:9000/trail/slash"
+  getResponseBody resp @?= "one"
+  resp3 <- httpBS "GET http://localhost:9000/trail/slash/"
+  getResponseBody resp3 @?= "one"
+  resp4 <- httpBS "GET http://localhost:9000/lead/slash"
+  getResponseBody resp4 @?= "two"
+  resp5 <- httpBS "GET http://localhost:9000/lead/slash/"
+  getResponseBody resp5 @?= "two"
+
+emptyComponent :: Assertion
+emptyComponent = do
+  let rules =
+        [ mkRuleSpec "empty//component" $ Template "one"
+        , mkRuleSpec "empty/component//" $ Template "two"
+        , mkRuleSpec "//empty/component" $ Template "three"
+        , mkRuleSpec "/" $ Template "four"
+        , mkRuleSpec "//" $ Template "five"
+        ]
+  _ <- httpNoBody (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
+  resp <- httpBS "GET http://localhost:9000/empty//component"
+  getResponseBody resp @?= "one"
+  resp2 <- httpBS "GET http://localhost:9000/empty/component/"
+  getResponseStatusCode resp2 @?= 404
+  resp3 <- httpBS "GET http://localhost:9000/empty/component//"
+  getResponseBody resp3 @?= "two"
+  resp4 <- httpBS "GET http://localhost:9000//empty/component"
+  getResponseBody resp4 @?= "three"
+  resp5 <- httpBS "GET http://localhost:9000/"
+  getResponseBody resp5 @?= "four"
+  resp6 <- httpBS "GET http://localhost:9000///"
+  getResponseBody resp6 @?= "five"

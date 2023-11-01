@@ -190,7 +190,10 @@ loadRulesFile (Just rulesFile) = do
 
 app :: DecoyCtx -> Wai.Application
 app dc req respHandler = do
-  let reqPath = Wai.pathInfo req
+  let removeTrailingEmpty = reverse . dropEmpty . reverse where
+        dropEmpty ("" : rest) = rest
+        dropEmpty x = x
+      reqPath = removeTrailingEmpty $ Wai.pathInfo req
       queryMap = M.mapKeys TE.decodeUtf8Lenient
                . fmap (fmap TE.decodeUtf8Lenient)
                . M.fromList

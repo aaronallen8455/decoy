@@ -37,6 +37,7 @@ import           Data.Aeson
 import           Data.Bifunctor (first)
 import qualified Data.JSONPath as JP
 import qualified Data.Map.Strict as M
+import           Data.Maybe
 import qualified Data.Text as T
 import qualified Text.Megaparsec as P
 import qualified Text.Mustache as Stache
@@ -161,9 +162,14 @@ data PathPart
   deriving (Show, Eq)
 
 pathFromText :: T.Text -> [PathPart]
-pathFromText txt = parsePart <$> T.split (== '/') (dropSlashes txt)
+pathFromText txt = map parsePart . handleEmpty
+                 $ T.split (== '/') (dropSlashes txt)
   where
-    dropSlashes = T.dropWhile (== '/') . T.dropWhileEnd (== '/')
+    dropSlashes "//" = "/"
+    dropSlashes x = (fromMaybe <*> T.stripPrefix "/")
+                  $ (fromMaybe <*> T.stripSuffix "/") x
+    handleEmpty [""] = []
+    handleEmpty x = x
     parsePart p =
       case T.stripPrefix ":" p of
         Nothing -> Static p
