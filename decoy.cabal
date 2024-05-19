@@ -21,6 +21,7 @@ library
     exposed-modules:  Decoy
     other-modules: Decoy.Router
                    Decoy.Rule
+                   Decoy.Modifier
     -- other-extensions:
     build-depends:    base >=4.15.0.0,
                       async,
@@ -33,6 +34,7 @@ library
                       http-types,
                       http-conduit,
                       aeson,
+                      aeson-diff,
                       directory,
                       jsonpath,
                       regex-tdfa,
@@ -81,4 +83,5 @@ test-suite decoy-test
         http-types,
         text,
         aeson,
+        aeson-diff,
         aeson-qq

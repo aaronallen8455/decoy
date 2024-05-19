@@ -16,6 +16,7 @@ module Decoy.Rule
   , KeyValRule(..)
   , KeyValRules
   , PathPart(..)
+  , NoId(..)
   -- * Instantiating rules
   , mkRuleSpec
   , compileRule

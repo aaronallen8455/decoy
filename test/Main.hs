@@ -3,6 +3,8 @@
 module Main (main) where
 
 import qualified Data.Aeson as Aeson
+import           Data.Aeson.Patch
+import           Data.Aeson.Pointer
 import           Data.Aeson.QQ
 import           Data.Either
 import           Test.Tasty
@@ -19,6 +21,8 @@ tests :: DecoyCtx -> TestTree
 tests dc = testGroup "Tests"
   [ testCase "Add rule via request" addRulesByRequest
   , testCase "Add rule via API" (addRulesByApi dc)
+  , testCase "Add modifier via request" addModifiersByRequest
+  , testCase "add modifier via API" (addModifiersByApi dc)
   , testCase "Body regex rule" bodyRegex
   , testCase "JSON body regex" jsonRegex
   , testCase "Request method" requestMethod
@@ -32,6 +36,7 @@ tests dc = testGroup "Tests"
   , testCase "Deals with slashes" slashes
   , testCase "Empty component" emptyComponent
   , testCase "Header rules" headerMatch
+  -- TODO reset endpoint
   ]
 
 addRulesByRequest :: Assertion
@@ -44,13 +49,45 @@ addRulesByRequest = do
 addRulesByApi :: DecoyCtx -> Assertion
 addRulesByApi dc = do
   let rule = fromRight undefined . compileRule $ mkRuleSpec "this/is/another/path" $ Template "This is another response"
-  rId <- addRule dc rule
+  [rId] <- addRules dc [rule]
   resp <- httpBS "GET http://localhost:9000/this/is/another/path"
   getResponseBody resp @?= "This is another response"
 
-  removeRule dc rId
+  removeRules dc [rId]
   resp2 <- httpBS "GET http://localhost:9000/this/is/another/path"
   getResponseStatusCode resp2 @?= 404
+
+addModifiersByRequest :: Assertion
+addModifiersByRequest = do
+  let rule = mkRuleSpec "this/is/a/path" (Template "{\"foo\":true}")
+  [ruleId] <- getResponseBody <$> httpJSON (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
+  let modifiers =
+        [ mkModifierSpec (ByRule rule) (Patch [Add (Pointer [OKey "bar"]) (Aeson.String "bar")])
+        , mkModifierSpec (ById ruleId) (Patch [Add (Pointer [OKey "baz"]) (Aeson.String "baz")])
+        ]
+  modIds <- getResponseBody <$> httpJSON (setRequestBodyJSON modifiers "POST http://localhost:9000/_add-modifiers")
+  resp <- httpBS "GET http://localhost:9000/this/is/a/path"
+  getResponseBody resp @?= "{\"bar\":\"bar\",\"baz\":\"baz\",\"foo\":true}"
+  _ <- httpNoBody (setRequestBodyJSON (modIds :: Aeson.Value) "POST http://localhost:9000/_remove-modifiers")
+  resp2 <- httpBS "GET http://localhost:9000/this/is/a/path"
+  getResponseBody resp2 @?= "{\"foo\":true}"
+
+addModifiersByApi :: DecoyCtx -> Assertion
+addModifiersByApi dc = do
+  let ruleSpec = mkRuleSpec "this/is/another/path" $ Template "{\"foo\":true}"
+  let rule = fromRight undefined $ compileRule ruleSpec
+  [ruleId] <- addRules dc [rule]
+  let modifiers = fromRight undefined $ traverse compileModifier
+        [ mkModifierSpec (ByRule ruleSpec) (Patch [Add (Pointer [OKey "bar"]) (Aeson.String "bar")])
+        , mkModifierSpec (ById ruleId) (Patch [Add (Pointer [OKey "baz"]) (Aeson.String "baz")])
+        ]
+  modIds <- addModifiers dc modifiers
+  resp <- httpBS "GET http://localhost:9000/this/is/another/path"
+  getResponseBody resp @?= "{\"bar\":\"bar\",\"baz\":\"baz\",\"foo\":true}"
+
+  removeModifiers dc modIds
+  resp2 <- httpBS "GET http://localhost:9000/this/is/another/path"
+  getResponseBody resp2 @?= "{\"foo\":true}"
 
 bodyRegex :: Assertion
 bodyRegex = do
@@ -137,7 +174,7 @@ queryStringMatch = do
 queryStringArg :: Assertion
 queryStringArg = do
   let rule = mkRuleSpec "query/string/arg" $ Template "query: {{query.arg}}"
-  _ <- httpNoBody (setRequestBodyJSON rule "POST http://localhost:9000/_add-rule")
+  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
   resp <- httpBS "GET http://localhost:9000/query/string/arg?arg=sup"
   getResponseBody resp @?= "query: sup"
 
@@ -151,12 +188,9 @@ removeRuleByRequest = do
     httpJSON (setRequestBodyJSON rules "POST http://localhost:9000/_add-rules")
   resp <- httpBS "GET http://localhost:9000/delete/me"
   getResponseBody resp @?= "one"
-  _ <- httpNoBody (setRequestBodyJSON (head rIds) "POST http://localhost:9000/_remove-rule")
-  resp2 <- httpBS "GET http://localhost:9000/delete/me"
+  _ <- httpNoBody (setRequestBodyJSON rIds "POST http://localhost:9000/_remove-rules")
+  resp2 <- httpBS "GET http://localhost:9000/delete/me2"
   getResponseStatusCode resp2 @?= 404
-  _ <- httpNoBody (setRequestBodyJSON (drop 1 rIds) "POST http://localhost:9000/_remove-rules")
-  resp3 <- httpBS "GET http://localhost:9000/delete/me2"
-  getResponseStatusCode resp3 @?= 404
 
 slashes :: Assertion
 slashes = do
