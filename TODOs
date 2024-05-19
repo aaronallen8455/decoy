@@ -1,7 +1,5 @@
 Write docs
 
-Header rules
-
 Debug verbosity settings
 
 Rules spec format other than json?
@@ -11,3 +9,5 @@ Specify multiple rules files
 http vs https rule
 
 Array of request methods, content headers
+
+Schema for modifiers

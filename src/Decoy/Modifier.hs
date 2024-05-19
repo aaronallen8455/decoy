@@ -24,6 +24,14 @@ import           Decoy.Rule
 -- | A specification for a modifier. Construct this using 'mkModifierSpec' and convert
 -- to a 'Modifier' using 'compileModifier'.
 --
+-- Modifiers are used to apply a JSON patch to the response for requests that
+-- match a rule. You can either define a rule that is specific to the modifier
+-- or use the ID of an existing rule. For example, if you want to add a key to
+-- a response for a specific test scenario, you could do that by adding a
+-- modifier in that test.
+--
+-- The JSON patch functionality comes from the `aeson-diff` package.
+--
 -- @since 0.1.0.0
 type ModifierSpec = ModifierF NoId RuleSpec
 

@@ -32,11 +32,10 @@ with an array of JSON specifications for the rules to be added as the request
 body. The response will be a JSON array of the IDs assigned to those rules in
 the order they were sent. For example, if the server is running on port 9000,
 the request would be sent to `http://localhost:9000/_add-rules`. The JSON for
-specifying a rule is outlined below. There is also an `_add-rule` endpoint for
-adding a single rule rather than an array of rules which returns a single rule ID.
+specifying a rule is outlined below.
 
-Rules can be removed from a server using the `_remove-rules` and `_remove-rule`
-endpoints which take as the request body an array of rule IDs or a single rule
+Rules can be removed from a server using the `_remove-rules`
+endpoint which take as the request body an array of rule IDs or a single rule
 ID respectively.
 
 The server can be reset to to its initial state by hitting the `_reset` endpoint.
