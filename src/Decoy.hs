@@ -34,6 +34,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as T
+import           Data.Traversable (for)
 import qualified Network.HTTP.Types as Http
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
@@ -50,7 +51,7 @@ import           Decoy.Rule as Rule
 data DecoyCtx = DC
   { dcRouter :: MVar R.Router
   , dcRuleIds :: MVar (M.Map Rule.RuleId [Rule.PathPart])
-  , dcRulesFile :: Maybe FilePath
+  , dcRulesFiles :: [FilePath]
   , dcFileCache :: MVar FileCache
   , dcModifiers :: MVar (M.Map ModifierId ModifierWithId)
   }
@@ -62,39 +63,39 @@ type FileCache = M.Map FilePath Stache.Template
 -- __Example:__
 --
 -- @
--- withDecoyServer 8080 Nothing $ \dc -> do
+-- withDecoyServer 8080 [] $ \dc -> do
 --    addRules dc someRules
 --    _ <- httpBS "GET http://localhost:8080/some/path"
 -- @
 --
 -- @since 0.1.0.0
-withDecoyServer :: Warp.Port -> Maybe FilePath -> (DecoyCtx -> IO a) -> IO a
-withDecoyServer port mRulesFile cont = do
-  rules <- loadRulesFile mRulesFile
-  dc <- initDecoyCtx mRulesFile rules
+withDecoyServer :: Warp.Port -> [FilePath] -> (DecoyCtx -> IO a) -> IO a
+withDecoyServer port rulesFiles cont = do
+  rules <- loadRulesFiles rulesFiles
+  dc <- initDecoyCtx rulesFiles rules
   Async.withAsync (Warp.run port $ app dc)
     $ \_ -> cont dc
 
 -- | Run a decoy server in the returned @Async@. The caller is responsible for
 -- canceling the async.
-decoyServerAsync :: Warp.Port -> Maybe FilePath -> IO (DecoyCtx, Async.Async ())
-decoyServerAsync port mRulesFile = do
-  rules <- loadRulesFile mRulesFile
-  dc <- initDecoyCtx mRulesFile rules
+decoyServerAsync :: Warp.Port -> [FilePath] -> IO (DecoyCtx, Async.Async ())
+decoyServerAsync port rulesFiles = do
+  rules <- loadRulesFiles rulesFiles
+  dc <- initDecoyCtx rulesFiles rules
   async <- Async.async (Warp.run port $ app dc)
   pure (dc, async)
 
 -- | Run a decoy server synchronously given a port and optional rules file.
 --
 -- @since 0.1.0.0
-runDecoyServer :: Warp.Port -> Maybe FilePath -> IO ()
-runDecoyServer port mRulesFile = do
-  rules <- loadRulesFile mRulesFile
-  dc <- initDecoyCtx mRulesFile rules
+runDecoyServer :: Warp.Port -> [FilePath] -> IO ()
+runDecoyServer port rulesFiles = do
+  rules <- loadRulesFiles rulesFiles
+  dc <- initDecoyCtx rulesFiles rules
   Warp.run port $ app dc
 
-initDecoyCtx :: Maybe FilePath -> [RuleWithId] -> IO DecoyCtx
-initDecoyCtx mRulesFile rules = do
+initDecoyCtx :: [FilePath] -> [RuleWithId] -> IO DecoyCtx
+initDecoyCtx rulesFiles rules = do
   initRouterMVar <- newMVar $ R.mkRouter rules
   initFileCache <- newMVar mempty
   initRuleIds <- newMVar mempty
@@ -102,7 +103,7 @@ initDecoyCtx mRulesFile rules = do
   pure DC
     { dcRouter = initRouterMVar
     , dcRuleIds = initRuleIds
-    , dcRulesFile = mRulesFile
+    , dcRulesFiles = rulesFiles
     , dcFileCache = initFileCache
     , dcModifiers = initModifierMVar
     }
@@ -189,20 +190,22 @@ withModifiers dc rules action =
 reset :: DecoyCtx -> IO ()
 reset dc = do
   putMVar (dcRouter dc) . R.mkRouter
-    =<< loadRulesFile (dcRulesFile dc)
+    =<< loadRulesFiles (dcRulesFiles dc)
   putMVar (dcRuleIds dc) mempty
+  putMVar (dcModifiers dc) mempty
 
-loadRulesFile :: Maybe FilePath -> IO [RuleWithId]
-loadRulesFile Nothing = pure []
-loadRulesFile (Just rulesFile) = do
-  rulesFileExists <- Dir.doesPathExist rulesFile
-  if rulesFileExists
-     then do
-       values <- Aeson.eitherDecodeFileStrict rulesFile
-       case traverse compileRule =<< values of
-         Left err -> fail $ "Failed to parse rules file: " <> err
-         Right rules -> pure $ zipWith (\r i -> r {ruleId = i}) rules [initRuleId..]
-     else fail $ "File does not exist: " <> rulesFile
+loadRulesFiles :: [FilePath] -> IO [RuleWithId]
+loadRulesFiles rulesFiles = do
+  rules <- fmap concat . for rulesFiles $ \rulesFile -> do
+    rulesFileExists <- Dir.doesPathExist rulesFile
+    if rulesFileExists
+       then do
+         values <- Aeson.eitherDecodeFileStrict rulesFile
+         case traverse compileRule =<< values of
+           Left err -> fail $ "Failed to parse rules file: " <> rulesFile <> ": " <> err
+           Right rules -> pure rules
+       else fail $ "File does not exist: " <> rulesFile
+  pure $ zipWith (\r i -> r {ruleId = i}) rules [initRuleId..]
 
 app :: DecoyCtx -> Wai.Application
 app dc req respHandler = do
@@ -271,7 +274,7 @@ app dc req respHandler = do
           respHandler $ Wai.responseLBS Http.ok200 [] "Modifiers removed"
 
     ["_reset"] -> do
-      putMVar (dcRouter dc) . R.mkRouter =<< loadRulesFile (dcRulesFile dc)
+      putMVar (dcRouter dc) . R.mkRouter =<< loadRulesFiles (dcRulesFiles dc)
       putMVar (dcModifiers dc) mempty
       respHandler $ Wai.responseLBS Http.ok200 [] "Rules reset"
 

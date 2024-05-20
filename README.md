@@ -13,7 +13,8 @@ Decoy can used as either a standalone executable or as a Haskell library.
 The Decoy exectuable starts a mock server on the port specified by the
 `DECOY_PORT` environment variable (defaults to 9000 if not specified). You can
 also supply a path to a file containing rule specifications via the
-`DECOY_RULES_FILE` environment variable.
+`DECOY_RULES_FILE` environment variable. Multiple files can be specified using
+whitespace separation.
 
 ### Library
 Haskell projects can take advantage of the API for manipulating running server
@@ -42,4 +43,4 @@ The server can be reset to to its initial state by hitting the `_reset` endpoint
 
 ## Rule specification
 The [JSON schema](https://json-schema.org) for the rule specification object
-can be found [here](./rule-spec.schema.json).
+can be found [here](./rule_spec.schema.json).

@@ -15,7 +15,7 @@ import qualified Network.HTTP.Types.Header as H
 import           Decoy
 
 main :: IO ()
-main = withDecoyServer 9000 Nothing $ defaultMain . tests
+main = withDecoyServer 9000 ["test_rules.json"] $ defaultMain . tests
 
 tests :: DecoyCtx -> TestTree
 tests dc = testGroup "Tests"
@@ -36,6 +36,7 @@ tests dc = testGroup "Tests"
   , testCase "Deals with slashes" slashes
   , testCase "Empty component" emptyComponent
   , testCase "Header rules" headerMatch
+  , testCase "Rules file" rulesFile
   -- TODO reset endpoint
   ]
 
@@ -245,3 +246,8 @@ headerMatch = do
   getResponseBody resp2 @?= "ok"
   resp3 <- httpBS "GET http://localhost:9000/header/check2"
   getResponseStatusCode resp3 @?= 404
+
+rulesFile :: Assertion
+rulesFile = do
+  resp <- httpBS "GET http://localhost:9000/path/of/righteousness"
+  getResponseBody resp @?= "hey"
