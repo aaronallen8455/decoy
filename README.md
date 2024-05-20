@@ -12,8 +12,8 @@ Decoy can used as either a standalone executable or as a Haskell library.
 ### Executable
 The Decoy exectuable starts a mock server on the port specified by the
 `DECOY_PORT` environment variable (defaults to 9000 if not specified). You can
-also supply a path to a file containing rule specifications via the
-`DECOY_RULES_FILE` environment variable. Multiple files can be specified using
+also supply a path to one or more files containing rule specifications via the
+`DECOY_RULE_FILES` environment variable. Multiple files can be specified using
 whitespace separation.
 
 ### Library
