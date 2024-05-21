@@ -10,7 +10,9 @@ module Decoy.Rule
   , RuleSpec
   , Response(..)
   , ResponseBody(..)
-  , Request(..)
+  , RequestF(..)
+  , Request
+  , RequestSpec
   , JsonPathOpts(..)
   , BodyRule(..)
   , KeyValRule(..)
@@ -21,6 +23,7 @@ module Decoy.Rule
   , mkRuleSpec
   , compileRule
   , initRuleId
+  , compileRequest
   -- * Rule modifiers
   , setUrlPath
   , addQueryRule
@@ -90,15 +93,21 @@ type RuleSpec = RuleF [KeyValRule]
 --
 -- @since 0.1.0.0
 data RuleF keyValRules urlPath jsonPath ruleId template = MkRule
-  { request :: Request keyValRules urlPath jsonPath
+  { request :: RequestF keyValRules urlPath jsonPath
   , response :: Response template
   , ruleId :: ruleId
   } deriving (Show, Eq, Functor)
 
+-- | Specifies the parameters for matching against a request.
+--
+-- @since 0.1.0.0
+type RequestSpec = RequestF [KeyValRule] T.Text T.Text
+type Request = RequestF KeyValRules [PathPart] [JP.JSONPathElement]
+
 -- | Request portion of a rule.
 --
 -- @since 0.1.0.0
-data Request keyValRules urlPath jsonPath = MkRequest
+data RequestF keyValRules urlPath jsonPath = MkRequest
   { reqPath :: urlPath
   , reqQueryRules :: keyValRules
   , reqMethod :: Maybe T.Text
@@ -360,22 +369,25 @@ setStatusCode c r = r { response = (response r) { respStatusCode = Just c } }
 compileRule :: RuleSpec -> Either String Rule
 compileRule rs = do
   body <- traverse (first show . Stache.compileTemplate "") $ response rs
-  req <- traverse (first P.errorBundlePretty . P.runParser (JP.jsonPath P.eof) "")
-       $ request rs
-
+  req <- compileRequest $ request rs
 
   Right MkRule
     { response = body
-    , request = req { reqPath = pathFromText $ reqPath req
-                    , reqQueryRules =
-                        M.fromList $ (\q -> (keyName q, expectedValue q))
-                                 <$> reqQueryRules req
-                    , reqHeaderRules =
-                        M.fromList $ (\q -> (keyName q, expectedValue q))
-                                 <$> reqHeaderRules req
-                    }
+    , request = req
     , ruleId = NoId
     }
+
+compileRequest :: RequestSpec -> Either String Request
+compileRequest rs = do
+  req <- traverse (first P.errorBundlePretty . P.runParser (JP.jsonPath P.eof) "") rs
+  pure req { reqPath = pathFromText $ reqPath req
+           , reqQueryRules =
+               M.fromList $ (\q -> (keyName q, expectedValue q))
+                        <$> reqQueryRules req
+           , reqHeaderRules =
+               M.fromList $ (\q -> (keyName q, expectedValue q))
+                        <$> reqHeaderRules req
+           }
 
 instance FromJSON RuleSpec where
   parseJSON = withObject "rule" $ \o ->
@@ -398,7 +410,7 @@ instance FromJSON (Response T.Text) where
       <*> o .:? "contentType"
       <*> o .:? "statusCode"
 
-instance FromJSON (Request [KeyValRule] T.Text T.Text) where
+instance FromJSON RequestSpec where
   parseJSON = withObject "request" $ \o ->
     MkRequest
     <$> o .: "path"
@@ -448,7 +460,7 @@ instance ToJSON (Response T.Text) where
     , "statusCode" .= respStatusCode r
     ]
 
-instance ToJSON (Request [KeyValRule] T.Text T.Text) where
+instance ToJSON RequestSpec where
   toJSON r = object
     [ "path" .= reqPath r
     , "queryRules" .= reqQueryRules r

@@ -345,10 +345,10 @@ matchModifier
 matchModifier ruleId queryMap reqBodyBS mReqJson reqHeaders reqMethod path modifier =
   case matcher modifier of
     ById rId -> rId == ruleId
-    ByRule rule ->
-      R.matchPath (reqPath $ request rule) path
+    ByRequest req ->
+      R.matchPath (reqPath req) path
       &&
-      R.matchRule queryMap reqBodyBS mReqJson reqHeaders reqMethod rule
+      R.matchRequest queryMap reqBodyBS mReqJson reqHeaders reqMethod req
 
 applyModifierPatches :: [ModifierWithId] -> LBS.ByteString -> LBS.ByteString
 applyModifierPatches [] bs = bs

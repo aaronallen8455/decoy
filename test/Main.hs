@@ -63,7 +63,7 @@ addModifiersByRequest = do
   let rule = mkRuleSpec "this/is/a/path" (Template "{\"foo\":true}")
   [ruleId] <- getResponseBody <$> httpJSON (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
   let modifiers =
-        [ mkModifierSpec (ByRule rule) (Patch [Add (Pointer [OKey "bar"]) (Aeson.String "bar")])
+        [ mkModifierSpec (ByRequest $ request rule) (Patch [Add (Pointer [OKey "bar"]) (Aeson.String "bar")])
         , mkModifierSpec (ById ruleId) (Patch [Add (Pointer [OKey "baz"]) (Aeson.String "baz")])
         ]
   modIds <- getResponseBody <$> httpJSON (setRequestBodyJSON modifiers "POST http://localhost:9000/_add-modifiers")
@@ -79,7 +79,7 @@ addModifiersByApi dc = do
   let rule = fromRight undefined $ compileRule ruleSpec
   [ruleId] <- addRules dc [rule]
   let modifiers = fromRight undefined $ traverse compileModifier
-        [ mkModifierSpec (ByRule ruleSpec) (Patch [Add (Pointer [OKey "bar"]) (Aeson.String "bar")])
+        [ mkModifierSpec (ByRequest $ request ruleSpec) (Patch [Add (Pointer [OKey "bar"]) (Aeson.String "bar")])
         , mkModifierSpec (ById ruleId) (Patch [Add (Pointer [OKey "baz"]) (Aeson.String "baz")])
         ]
   modIds <- addModifiers dc modifiers

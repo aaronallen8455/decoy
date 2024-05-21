@@ -10,7 +10,7 @@ module Decoy.Router
   , removeRouterRule
   , matchPath
   , matchEndpoint
-  , matchRule
+  , matchRequest
   , MatchedEndpoint(..)
   , QueryParams
   , renderTemplate
@@ -126,7 +126,8 @@ matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
   go params router [] = asum $ do
     ep <- endpoints router
 
-    guard $ matchRule queryParams rawBody mReqJson reqHeaders reqMeth (epRule ep)
+    guard $ matchRequest queryParams rawBody mReqJson reqHeaders reqMeth (request $ epRule ep)
+    guard $ matchResponse reqHeaders (response $ epRule ep)
 
     let pathParams = M.fromList $ zip (epPathParamNames ep) params
         resp = response (epRule ep)
@@ -139,31 +140,36 @@ matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
       , matchedRuleId = ruleId $ epRule ep
       }
 
-matchRule
+matchRequest
   :: QueryParams
   -> LBS.ByteString
   -> Maybe Aeson.Value
   -> Http.RequestHeaders
   -> Http.Method
-  -> RuleF KeyValRules [PathPart] [JP.JSONPathElement] ruleId Stache.Template
+  -> Request
   -> Bool
-matchRule queryParams rawBody mReqJson reqHeaders reqMeth rule = isJust $ do
-  guard $ matchQuery (reqQueryRules $ request rule) queryParams
+matchRequest queryParams rawBody mReqJson reqHeaders reqMeth req = isJust $ do
+  guard $ matchQuery (reqQueryRules req) queryParams
 
-  guard $ matchHeaders (reqHeaderRules $ request rule) reqHeaders
+  guard $ matchHeaders (reqHeaderRules req) reqHeaders
 
-  for_ (reqContentType $ request rule) $ \ct ->
+  for_ (reqContentType req) $ \ct ->
     maybe empty (guard . (ct `T.isInfixOf`) . TE.decodeUtf8Lenient)
       $ lookup Http.hContentType reqHeaders
 
-  for_ (respContentType (response rule)) $ \a ->
-    maybe empty (guard . (a `T.isInfixOf`) . TE.decodeUtf8Lenient)
-      $ lookup Http.hAccept reqHeaders
-
-  for_ (reqMethod $ request rule)
+  for_ (reqMethod req)
     $ guard . (== reqMeth) . TE.encodeUtf8
 
-  guard $ matchBody (reqBodyRules (request rule)) rawBody mReqJson
+  guard $ matchBody (reqBodyRules req) rawBody mReqJson
+
+matchResponse
+  :: Http.RequestHeaders
+  -> Response Stache.Template
+  -> Bool
+matchResponse reqHeaders resp = isJust $
+  for_ (respContentType resp) $ \a ->
+    maybe empty (guard . (a `T.isInfixOf`) . TE.decodeUtf8Lenient)
+      $ lookup Http.hAccept reqHeaders
 
 matchBody :: [BodyRule [JP.JSONPathElement]] -> LBS.ByteString -> Maybe Aeson.Value -> Bool
 matchBody bodyRules rawBody mBodyJson = all match bodyRules where

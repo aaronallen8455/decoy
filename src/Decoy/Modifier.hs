@@ -26,18 +26,18 @@ import           Decoy.Rule
 -- to a 'Modifier' using 'compileModifier'.
 --
 -- Modifiers are used to apply a JSON patch to the response for requests that
--- match a rule. You can either define a rule that is specific to the modifier
--- or use the ID of an existing rule. For example, if you want to add a key to
--- a response for a specific test scenario, you could do that by adding a
--- modifier in that test.
+-- match a rule. You can either define a request matcher that is specific to
+-- the modifier or use the ID of an existing rule. For example, if you want to
+-- add a key to a response for a specific test scenario, you could do that by
+-- adding a modifier in that test.
 --
 -- The JSON patch functionality comes from the `aeson-diff` package.
 --
 -- @since 0.1.0.0
-type ModifierSpec = ModifierF NoId RuleSpec
+type ModifierSpec = ModifierF NoId RequestSpec
 
-type Modifier = ModifierF NoId Rule
-type ModifierWithId = ModifierF ModifierId Rule
+type Modifier = ModifierF NoId Request
+type ModifierWithId = ModifierF ModifierId Request
 
 newtype ModifierId = MkModifierId Int
   deriving (Enum, Eq, Ord, Show)
@@ -46,8 +46,8 @@ newtype ModifierId = MkModifierId Int
 initModifierId :: ModifierId
 initModifierId = MkModifierId 1
 
-data ModifierF id rule = MkModifier
-  { matcher :: Matcher rule
+data ModifierF id req = MkModifier
+  { matcher :: Matcher req
   , jsonPatch :: AP.Patch
   , modifierId :: id
   } deriving (Show, Eq, Functor, Foldable, Traversable)
@@ -57,7 +57,7 @@ data ModifierF id rule = MkModifier
 -- __Examples:__
 --
 -- @
--- mkModifierSpec (ByRule rule) (Patch [Add (Pointer [OKey "key"]) (String "value")])
+-- mkModifierSpec (ByRequest request) (Patch [Add (Pointer [OKey "key"]) (String "value")])
 -- mkModifierSpec (ById ruleId) (Patch [Add (Pointer [OKey "key"]) (String "value")])
 -- @
 --
@@ -74,15 +74,15 @@ mkModifierSpec matcher patch =
 -- ID of an existing rule.
 --
 -- @since 0.1.0.0
-type MatcherSpec = Matcher RuleSpec
+type MatcherSpec = Matcher RequestSpec
 
-data Matcher rule
-  = ByRule rule
+data Matcher req
+  = ByRequest req
   | ById RuleId
   deriving (Show, Eq, Functor, Foldable, Traversable)
 
 compileModifier :: ModifierSpec -> Either String Modifier
-compileModifier = traverse compileRule
+compileModifier = traverse compileRequest
 
 instance ToJSON ModifierSpec where
   toJSON m = object
@@ -90,10 +90,10 @@ instance ToJSON ModifierSpec where
     , "jsonPatch" .= jsonPatch m
     ]
 
-instance ToJSON (Matcher RuleSpec) where
-  toJSON (ByRule rule) = object
-    [ "type" .= ("rule" :: T.Text)
-    , "value" .= rule
+instance ToJSON (Matcher RequestSpec) where
+  toJSON (ByRequest req) = object
+    [ "type" .= ("request" :: T.Text)
+    , "value" .= req
     ]
   toJSON (ById ruleId) = object
     [ "type" .= ("rule_id" :: T.Text)
@@ -107,10 +107,10 @@ instance FromJSON ModifierSpec where
     <*> o .: "jsonPatch"
     <*> pure NoId
 
-instance FromJSON (Matcher RuleSpec) where
+instance FromJSON (Matcher RequestSpec) where
   parseJSON = withObject "matcher" $ \o -> do
     ty <- o .: "type"
     case ty :: String of
-      "rule" -> ByRule <$> o .: "value"
+      "request" -> ByRequest <$> o .: "value"
       "rule_id" -> ById <$> o .: "value"
       _ -> fail $ "invalid matcher type: " <> ty
