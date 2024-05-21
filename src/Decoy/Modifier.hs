@@ -4,6 +4,7 @@
 module Decoy.Modifier
   ( -- * Types
     ModifierF(..)
+  , ModifierSpec
   , Modifier
   , ModifierId(..)
   , ModifierWithId
