@@ -24,6 +24,7 @@ module Decoy.Rule
   , compileRule
   , initRuleId
   , compileRequest
+  , mkRequestSpec
   -- * Rule modifiers
   , setUrlPath
   , addQueryRule
@@ -103,6 +104,25 @@ data RuleF keyValRules urlPath jsonPath ruleId template = MkRule
 -- @since 0.1.0.0
 type RequestSpec = RequestF [KeyValRule] T.Text T.Text
 type Request = RequestF KeyValRules [PathPart] [JP.JSONPathElement]
+
+-- | Builds a request matcher from a url path
+--
+-- __Examples:__
+-- @
+-- mkRequestSpec "users/:userId/delete"
+-- @
+--
+-- @since 0.1.0.0
+mkRequestSpec :: T.Text -> RequestSpec
+mkRequestSpec urlPath =
+  MkRequest
+    { reqPath = urlPath
+    , reqQueryRules = mempty
+    , reqMethod = mempty
+    , reqContentType = mempty
+    , reqHeaderRules = mempty
+    , reqBodyRules = mempty
+    }
 
 -- | Request portion of a rule.
 --
@@ -202,14 +222,7 @@ pathFromText txt = map parsePart . handleEmpty
 mkRuleSpec :: T.Text -> ResponseBody T.Text -> RuleSpec
 mkRuleSpec urlPath body =
   MkRule
-    { request = MkRequest
-        { reqPath = urlPath
-        , reqQueryRules = mempty
-        , reqMethod = Nothing
-        , reqContentType = Nothing
-        , reqHeaderRules = mempty
-        , reqBodyRules = mempty
-        }
+    { request = mkRequestSpec urlPath
     , response = MkResponse
         { respBody = body
         , respContentType = Nothing
