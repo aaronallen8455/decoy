@@ -43,8 +43,10 @@ tests dc = testGroup "Tests"
 addRulesByRequest :: Assertion
 addRulesByRequest = do
   let rule = mkRuleSpec "this/is/a/path" (Template "This is a response")
-  _ <- httpNoBody (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
+  ruleIds <- getResponseBody <$>
+    httpJSON (setRequestBodyJSON [rule] "POST http://localhost:9000/_add-rules")
   resp <- httpBS "GET http://localhost:9000/this/is/a/path"
+  _ <- httpNoBody (setRequestBodyJSON (ruleIds :: Aeson.Value) "POST http://localhost:9000/_remove-rules")
   getResponseBody resp @?= "This is a response"
 
 addRulesByApi :: DecoyCtx -> Assertion

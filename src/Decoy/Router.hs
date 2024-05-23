@@ -4,6 +4,7 @@
 module Decoy.Router
   ( Router
   , mkRouter
+  , emptyRouter
   , addRouterRules
   , addRouterRule
   , removeRouterRules

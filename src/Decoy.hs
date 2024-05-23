@@ -22,7 +22,7 @@ module Decoy
 import qualified Control.Concurrent.Async as Async
 import           Control.Concurrent.MVar
 import           Control.Exception (bracket)
-import           Control.Monad (foldM)
+import           Control.Monad (foldM, void)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Diff as AD
 import qualified Data.Aeson.Types as Aeson
@@ -94,19 +94,21 @@ runDecoyServer port rulesFiles = do
   dc <- initDecoyCtx rulesFiles rules
   Warp.run port $ app dc
 
-initDecoyCtx :: [FilePath] -> [RuleWithId] -> IO DecoyCtx
+initDecoyCtx :: [FilePath] -> [Rule] -> IO DecoyCtx
 initDecoyCtx rulesFiles rules = do
-  initRouterMVar <- newMVar $ R.mkRouter rules
+  initRouterMVar <- newMVar R.emptyRouter
   initFileCache <- newMVar mempty
   initRuleIds <- newMVar mempty
   initModifierMVar <- newMVar mempty
-  pure DC
-    { dcRouter = initRouterMVar
-    , dcRuleIds = initRuleIds
-    , dcRulesFiles = rulesFiles
-    , dcFileCache = initFileCache
-    , dcModifiers = initModifierMVar
-    }
+  let dc = DC
+        { dcRouter = initRouterMVar
+        , dcRuleIds = initRuleIds
+        , dcRulesFiles = rulesFiles
+        , dcFileCache = initFileCache
+        , dcModifiers = initModifierMVar
+        }
+  void $ addRules dc rules
+  pure dc
 
 -- | Add new rules to running decoy server.
 --
@@ -189,14 +191,14 @@ withModifiers dc rules action =
 -- @since 0.1.0.0
 reset :: DecoyCtx -> IO ()
 reset dc = do
-  putMVar (dcRouter dc) . R.mkRouter
-    =<< loadRulesFiles (dcRulesFiles dc)
   putMVar (dcRuleIds dc) mempty
   putMVar (dcModifiers dc) mempty
+  putMVar (dcRouter dc) R.emptyRouter
+  void $ addRules dc =<< loadRulesFiles (dcRulesFiles dc)
 
-loadRulesFiles :: [FilePath] -> IO [RuleWithId]
-loadRulesFiles rulesFiles = do
-  rules <- fmap concat . for rulesFiles $ \rulesFile -> do
+loadRulesFiles :: [FilePath] -> IO [Rule]
+loadRulesFiles rulesFiles =
+  fmap concat . for rulesFiles $ \rulesFile -> do
     rulesFileExists <- Dir.doesPathExist rulesFile
     if rulesFileExists
        then do
@@ -205,7 +207,6 @@ loadRulesFiles rulesFiles = do
            Left err -> fail $ "Failed to parse rules file: " <> rulesFile <> ": " <> err
            Right rules -> pure rules
        else fail $ "File does not exist: " <> rulesFile
-  pure $ zipWith (\r i -> r {ruleId = i}) rules [initRuleId..]
 
 app :: DecoyCtx -> Wai.Application
 app dc req respHandler = do
@@ -274,8 +275,10 @@ app dc req respHandler = do
           respHandler $ Wai.responseLBS Http.ok200 [] "Modifiers removed"
 
     ["_reset"] -> do
-      putMVar (dcRouter dc) . R.mkRouter =<< loadRulesFiles (dcRulesFiles dc)
+      putMVar (dcRouter dc) R.emptyRouter
       putMVar (dcModifiers dc) mempty
+      putMVar (dcRuleIds dc) mempty
+      void $ addRules dc =<< loadRulesFiles (dcRulesFiles dc)
       respHandler $ Wai.responseLBS Http.ok200 [] "Rules reset"
 
     _ -> do
