@@ -1,0 +1,46 @@
+cabal-version:      3.0
+name:               decoy-types
+version:            0.1.0.0
+-- synopsis:
+-- description:
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Aaron Allen
+maintainer:         aaronallen8455@gmail.com
+-- copyright:
+category:           Testing
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+                    README.md
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  Decoy.Types
+                      Decoy.Rule
+                      Decoy.Modifier
+    build-depends:    base >=4.15.0.0,
+                      mustache,
+                      text,
+                      containers,
+                      aeson,
+                      aeson-diff,
+                      jsonpath,
+                      megaparsec
+    hs-source-dirs:   src
+    default-language: GHC2021
+
+test-suite decoy-types-test
+    import:           warnings
+    default-language: GHC2021
+    -- other-modules:
+    -- other-extensions:
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:
+        base,
+        decoy-types,
+        tasty

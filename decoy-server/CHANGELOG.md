@@ -1,4 +1,4 @@
-# Revision history for decoy
+# Revision history for decoy-server
 
 ## 0.1.0.0 -- YYYY-mm-dd
 
