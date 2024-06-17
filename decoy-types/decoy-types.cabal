@@ -43,4 +43,8 @@ test-suite decoy-types-test
     build-depends:
         base,
         decoy-types,
-        tasty
+        tasty,
+        tasty-hedgehog,
+        hedgehog,
+        aeson,
+        text

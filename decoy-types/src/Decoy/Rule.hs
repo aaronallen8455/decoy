@@ -60,7 +60,7 @@ newtype RuleId = MkRuleId Int
 initRuleId :: RuleId
 initRuleId = MkRuleId 1
 
-data NoId = NoId deriving Show
+data NoId = NoId deriving (Show, Eq)
 
 -- | A rule that has had an ID assigned by the server
 --
