@@ -40,8 +40,8 @@ type Modifier = ModifierF NoId Request
 type ModifierWithId = ModifierF ModifierId Request
 
 newtype ModifierId = MkModifierId Int
-  deriving (Enum, Eq, Ord, Show)
-  deriving newtype (ToJSON, FromJSON)
+  deriving (Enum, Eq, Ord)
+  deriving newtype (ToJSON, FromJSON, Show)
 
 initModifierId :: ModifierId
 initModifierId = MkModifierId 1

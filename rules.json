@@ -1,0 +1,11 @@
+[
+  { "request": {
+      "path": "path/of/righteousness",
+      "method": "GET"
+    },
+    "response": {
+      "type": "template",
+      "body": "hey"
+    }
+  }
+]

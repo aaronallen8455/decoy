@@ -39,7 +39,9 @@ library
                       regex-tdfa,
                       semialign,
                       these,
-                      case-insensitive
+                      case-insensitive,
+                      fast-logger,
+                      optparse-applicative
     hs-source-dirs:   src
     default-language: GHC2021
 

@@ -53,8 +53,8 @@ import qualified Text.Mustache as Stache
 --
 -- @since 0.1.0.0
 newtype RuleId = MkRuleId Int
-  deriving (Enum, Eq, Ord, Show)
-  deriving newtype (ToJSON, FromJSON)
+  deriving (Enum, Eq, Ord)
+  deriving newtype (ToJSON, FromJSON, Show)
 
 -- | Rule ID to seed a server with
 initRuleId :: RuleId

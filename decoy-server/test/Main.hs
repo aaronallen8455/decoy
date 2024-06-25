@@ -15,7 +15,7 @@ import qualified Network.HTTP.Types.Header as H
 import           Decoy
 
 main :: IO ()
-main = withDecoyServer 9000 ["test_rules.json"] $ defaultMain . tests
+main = withDecoyServer 9000 ["test_rules.json"] NoLogging $ defaultMain . tests
 
 tests :: DecoyCtx -> TestTree
 tests dc = testGroup "Tests"
@@ -52,7 +52,7 @@ addRulesByRequest = do
 addRulesByApi :: DecoyCtx -> Assertion
 addRulesByApi dc = do
   let rule = fromRight undefined . compileRule $ mkRuleSpec "this/is/another/path" $ Template "This is another response"
-  [rId] <- addRules dc [rule]
+  [rId] <- map ruleId <$> addRules dc [rule]
   resp <- httpBS "GET http://localhost:9000/this/is/another/path"
   getResponseBody resp @?= "This is another response"
 
@@ -79,12 +79,12 @@ addModifiersByApi :: DecoyCtx -> Assertion
 addModifiersByApi dc = do
   let ruleSpec = mkRuleSpec "this/is/another/path" $ Template "{\"foo\":true}"
   let rule = fromRight undefined $ compileRule ruleSpec
-  [ruleId] <- addRules dc [rule]
+  [ruleId] <- map ruleId <$> addRules dc [rule]
   let modifiers = fromRight undefined $ traverse compileModifier
         [ mkModifierSpec (ByRequest $ request ruleSpec) (Patch [Add (Pointer [OKey "bar"]) (Aeson.String "bar")])
         , mkModifierSpec (ById ruleId) (Patch [Add (Pointer [OKey "baz"]) (Aeson.String "baz")])
         ]
-  modIds <- addModifiers dc modifiers
+  modIds <- map modifierId <$> addModifiers dc modifiers
   resp <- httpBS "GET http://localhost:9000/this/is/another/path"
   getResponseBody resp @?= "{\"bar\":\"bar\",\"baz\":\"baz\",\"foo\":true}"
 
