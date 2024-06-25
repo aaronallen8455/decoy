@@ -22,13 +22,13 @@ library
                       Decoy.Rule
                       Decoy.Modifier
     build-depends:    base >=4.15.0.0,
-                      mustache,
-                      text,
+                      mustache >= 2 && < 3,
+                      text >= 2.0,
                       containers,
-                      aeson,
-                      aeson-diff,
-                      jsonpath,
-                      megaparsec
+                      aeson >= 2 && < 3,
+                      aeson-diff ^>= 1.1,
+                      jsonpath ^>= 0.3,
+                      megaparsec >= 9 && < 10
     hs-source-dirs:   src
     default-language: GHC2021
 
