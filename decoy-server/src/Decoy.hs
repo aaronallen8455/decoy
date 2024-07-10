@@ -190,13 +190,12 @@ runDecoyServerFromCmdLine = do
                  <> OP.value 9000
                  <> OP.metavar "PORT"
                   )
-          rulesFilesParser =
-            OP.option (words <$> OP.str)
-              ( OP.long "rules-files"
+          rulesFilesParser = OP.many $
+            OP.option OP.str
+              ( OP.long "rules-file"
              <> OP.short 'f'
-             <> OP.help "A list of paths to files containing rules to load on startup, whitespace separated"
-             <> OP.value []
-             <> OP.metavar "FILES"
+             <> OP.help "Path to a file containing rules to load on startup. Can be used multiple times for multiple files."
+             <> OP.metavar "FILE"
               )
           opts = OP.info (OP.helper <*> ((,) <$> configParser <*> rulesFilesParser))
             ( OP.fullDesc
