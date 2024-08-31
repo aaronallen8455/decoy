@@ -65,6 +65,10 @@
         "statusCode": {
           "type": ["integer", "null"],
           "description": "The status code that should be returned. If not specified, 200 is used."
+        },
+        "delayMillis": {
+          "type": ["number", "null"],
+          "description": "Adds a delay in milliseconds to the response time of the request."
         }
       }
     },

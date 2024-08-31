@@ -2,6 +2,7 @@
 
 import qualified Data.Aeson as Aeson
 import           Data.Functor.Const
+import           Data.Scientific (scientific)
 import qualified Data.Text as T
 import           Hedgehog
 import qualified Hedgehog.Gen as Gen
@@ -83,6 +84,9 @@ responseGen =
   <$> responseBodyGen
   <*> Gen.maybe (Gen.text (Range.linear 0 10) Gen.alpha)
   <*> Gen.maybe (pure 200)
+  <*> Gen.maybe (scientific <$> Gen.integral (Range.linear 0 200)
+                            <*> Gen.int (Range.linear (-4) 4)
+                )
 
 responseBodyGen :: Gen (ResponseBody T.Text)
 responseBodyGen = Gen.choice . getConst $

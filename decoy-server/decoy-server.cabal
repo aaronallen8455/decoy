@@ -37,6 +37,7 @@ library
                       directory,
                       jsonpath ^>= 0.3,
                       regex-tdfa >= 1 && < 2,
+                      scientific >= 0.3,
                       semialign,
                       these,
                       case-insensitive >= 1,

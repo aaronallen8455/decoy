@@ -26,6 +26,7 @@ import           Data.Foldable
 import qualified Data.JSONPath as JP
 import qualified Data.Map.Strict as M
 import           Data.Maybe
+import           Data.Scientific (Scientific)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import           Data.These (These(..))
@@ -94,6 +95,7 @@ data MatchedEndpoint = MkMatchedEndpoint
   , statusCode :: Maybe Word
   , pathParams :: M.Map T.Text T.Text
   , matchedRuleId :: RuleId
+  , delayMillis :: Maybe Scientific
   }
 
 matchPath
@@ -139,6 +141,7 @@ matchEndpoint queryParams rawBody mReqJson reqHeaders reqMeth = go [] where
       , statusCode = respStatusCode resp
       , pathParams
       , matchedRuleId = ruleId $ epRule ep
+      , delayMillis = respDelayMillis resp
       }
 
 matchRequest

@@ -23,6 +23,7 @@ library
                       Decoy.Modifier
     build-depends:    base >=4.15.0.0,
                       mustache >= 2 && < 3,
+                      scientific >= 0.3,
                       text >= 2.0,
                       containers,
                       aeson >= 2 && < 3,
@@ -43,6 +44,7 @@ test-suite decoy-types-test
     build-depends:
         base,
         decoy-types,
+        scientific,
         tasty,
         tasty-hedgehog,
         hedgehog,

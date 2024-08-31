@@ -45,6 +45,7 @@ import           Data.Bifunctor (first)
 import qualified Data.JSONPath as JP
 import qualified Data.Map.Strict as M
 import           Data.Maybe
+import           Data.Scientific (Scientific)
 import qualified Data.Text as T
 import qualified Text.Megaparsec as P
 import qualified Text.Mustache as Stache
@@ -178,6 +179,8 @@ data Response template = MkResponse
     -- ^ If specified, the request's @Accept@ header must contain this value.
   , respStatusCode :: Maybe Word
     -- ^ Specifies a status code for the response. @200@ is used if @Nothing@.
+  , respDelayMillis :: Maybe Scientific
+    -- ^ Number of milliseconds to artificially delay the response by.
   } deriving (Show, Eq, Functor, Foldable, Traversable)
 
 -- | The response body that will be returned if a rule matches.
@@ -199,8 +202,9 @@ pathFromText txt = map parsePart . handleEmpty
                  $ T.split (== '/') (dropSlashes txt)
   where
     dropSlashes "//" = "/"
-    dropSlashes x = (fromMaybe <*> T.stripPrefix "/")
-                  $ (fromMaybe <*> T.stripSuffix "/") x
+    dropSlashes x =
+      let ss = fromMaybe x $ T.stripSuffix "/" x
+       in fromMaybe ss $ T.stripPrefix "/" ss
     handleEmpty [""] = []
     handleEmpty x = x
     parsePart p =
@@ -227,6 +231,7 @@ mkRuleSpec urlPath body =
         { respBody = body
         , respContentType = Nothing
         , respStatusCode = Nothing
+        , respDelayMillis = Nothing
         }
     , ruleId = NoId
     }
@@ -422,6 +427,7 @@ instance FromJSON (Response T.Text) where
           )
       <*> o .:? "contentType"
       <*> o .:? "statusCode"
+      <*> o .:? "delayMillis"
 
 instance FromJSON RequestSpec where
   parseJSON = withObject "request" $ \o ->
@@ -471,6 +477,7 @@ instance ToJSON (Response T.Text) where
                 )
     , "contentType" .= respContentType r
     , "statusCode" .= respStatusCode r
+    , "delayMillis" .= respDelayMillis r
     ]
 
 instance ToJSON RequestSpec where

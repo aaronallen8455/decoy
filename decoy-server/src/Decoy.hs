@@ -21,6 +21,7 @@ module Decoy
   , module Mod
   ) where
 
+import           Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async as Async
 import           Control.Concurrent.MVar
 import           Control.Exception (bracket)
@@ -139,6 +140,8 @@ withDecoyServer port rulesFiles loggingOpt cont = do
 
 -- | Run a decoy server in the returned @Async@. The caller is responsible for
 -- canceling the async.
+--
+-- @since 0.1.0.0
 decoyServerAsync
   :: Warp.Port
   -> [FilePath]
@@ -489,7 +492,7 @@ handleMatchedEndpoint
   -> [ModifierWithId]
   -> IO Wai.Response
 handleMatchedEndpoint cfg logSuccess queryParams mReqJson fileCacheMVar
-          R.MkMatchedEndpoint{ R.responseBody, R.contentType, R.statusCode, R.pathParams }
+          R.MkMatchedEndpoint{ R.responseBody, R.contentType, R.statusCode, R.pathParams, R.delayMillis }
           matchedModifiers = do
   let respHeaders =
         [ (Http.hContentType, TE.encodeUtf8 ct) | Just ct <- [contentType] ]
@@ -500,33 +503,36 @@ handleMatchedEndpoint cfg logSuccess queryParams mReqJson fileCacheMVar
             Nothing -> Http.mkStatus (fromIntegral sc) mempty
             Just c -> c
 
-  case responseBody of
+  eRespLBS <- case responseBody of
     Template resp -> do
       let r = applyModifierPatches matchedModifiers
             . LBS.fromStrict
             $ TE.encodeUtf8 resp
-      logSuccess (Just r)
-      pure $ Wai.responseLBS respCode respHeaders r
+      pure . Right $ Just r
     File file -> do
       eContent <- getFileCache fileCacheMVar file
       case eContent of
         Left (FileNotFound fileName) -> do
           let r = "File not found: " <> BS8.pack fileName
           logErr cfg $ "Failed to render response: " <> Log.toLogStr r
-          pure $ Wai.responseLBS Http.notFound404 [] r
+          pure . Left $ Wai.responseLBS Http.notFound404 [] r
         Left (InvalidMustacheTemplate err) -> do
           let r = "Invalid mustache template: " <> BS8.pack (show err)
           logErr cfg $ "Failed to render response: " <> Log.toLogStr r
-          pure $ Wai.responseLBS Http.status500 [] r
+          pure . Left $ Wai.responseLBS Http.status500 [] r
         Right content -> do
           let r = applyModifierPatches matchedModifiers
                 . LBS.fromStrict . TE.encodeUtf8
                 $ R.renderTemplate pathParams queryParams mReqJson content
-          logSuccess (Just r)
-          pure $ Wai.responseLBS respCode respHeaders r
-    NoBody -> do
-      logSuccess Nothing
-      pure $ Wai.responseLBS respCode respHeaders ""
+          pure . Right $ Just r
+    NoBody -> pure $ Right Nothing
+
+  case eRespLBS of
+    Left errResp -> pure errResp
+    Right mResp -> do
+      traverse_ (threadDelay . round . (* 1000)) delayMillis
+      logSuccess mResp
+      pure $ Wai.responseLBS respCode respHeaders (fold mResp)
 
 allHttpStatuses :: M.Map Int Http.Status
 allHttpStatuses = M.fromList $ (\x -> (Http.statusCode x, x)) <$> [minBound .. maxBound]
