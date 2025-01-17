@@ -440,9 +440,11 @@ app cfg dc req respHandler = do
                       filter
                         (matchModifier (R.matchedRuleId matched) queryMap reqBodyBS mReqJson reqHeaders reqMethod reqPath)
                         (M.elems modifiers)
+                    logEndpoint =
+                      logMatchedEndpoint cfg reqMethod (Wai.rawPathInfo req <> Wai.rawQueryString req) (R.statusCode matched)
                 handleMatchedEndpoint
                   cfg
-                  (logMatchedEndpoint cfg reqMethod (Wai.rawPathInfo req) (R.statusCode matched))
+                  logEndpoint
                   queryMap
                   mReqJson
                   (dcFileCache dc)
